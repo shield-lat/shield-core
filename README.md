@@ -55,14 +55,41 @@ cd shield-core
 # Run with default config (auth disabled)
 cargo run
 
-# Run with authentication enabled
-SHIELD_AUTH__ENABLED=true cargo run
-
-# Or with custom config
-SHIELD_SERVER__PORT=3000 cargo run
+# Or with .env file (recommended for local dev)
+cp .env.example .env
+# Edit .env with your settings
+cargo run
 ```
 
 The server starts at `http://127.0.0.1:8080` by default.
+
+### Configuration Files
+
+Shield loads configuration in this order (later overrides earlier):
+
+1. `config/default.yaml` - Base defaults
+2. `config/local.yaml` - Local overrides (gitignored, for secrets)
+3. `.env` file - Environment variables (gitignored)
+4. Shell environment variables
+
+**Example `.env`:**
+```bash
+SHIELD_LLM_ENABLED=true
+SHIELD_SERVER_PORT=3000
+```
+
+**Example `config/local.yaml`** (for keys with underscores):
+```yaml
+llm:
+  enabled: true
+  openrouter_api_key: "sk-or-v1-xxx"
+
+auth:
+  enabled: true
+  jwt_secret: "your-production-secret"
+```
+
+> **Note:** Use `config/local.yaml` for config keys containing underscores (like `openrouter_api_key`), since environment variable parsing splits on `_`.
 
 ### Swagger UI
 
@@ -222,14 +249,7 @@ Shield Core can use **Meta Llama Guard 4** via OpenRouter for neural content saf
 
 1. Get an API key from [OpenRouter](https://openrouter.ai/)
 
-2. Configure via environment variables:
-```bash
-SHIELD_LLM_ENABLED=true \
-SHIELD_LLM_OPENROUTER_API_KEY=sk-or-v1-xxxxx \
-cargo run
-```
-
-Or via config file:
+2. Configure via `config/local.yaml` (recommended):
 ```yaml
 # config/local.yaml
 llm:
@@ -237,6 +257,18 @@ llm:
   openrouter_api_key: "sk-or-v1-xxxxx"
   guard_model: "meta-llama/llama-guard-4-12b"
   timeout_secs: 10
+```
+
+Or via `.env` for the enabled flag + config file for the key:
+```bash
+# .env
+SHIELD_LLM_ENABLED=true
+```
+
+```yaml
+# config/local.yaml
+llm:
+  openrouter_api_key: "sk-or-v1-xxxxx"
 ```
 
 ### How It Works
@@ -266,13 +298,67 @@ If the Llama Guard API fails or times out:
 
 ## API Endpoints
 
-### Evaluate Action
+### Simple Evaluate (Recommended for Agents)
+
+```bash
+POST /v1/evaluate
+Authorization: Bearer <app_api_key>
+```
+
+Simplified endpoint for agent integration. The app is automatically identified via the API key.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8080/v1/evaluate \
+  -H "Authorization: Bearer sk_live_your_app_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": "Transfer $100 to account 12345",
+    "action_type": "transfer_funds",
+    "payload": {"amount": 100, "to_account_id": "12345"},
+    "user_id": "user-123"
+  }'
+```
+
+**Request Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `input` | ✅ | The user's input/intent to evaluate |
+| `action_type` | ❌ | Action type (defaults to "unknown") |
+| `payload` | ❌ | Additional context data |
+| `user_id` | ❌ | User ID (defaults to "anonymous") |
+| `model_name` | ❌ | LLM model name |
+
+**Response:**
+```json
+{
+  "safe": true,
+  "decision": "allow",
+  "risk_tier": "low",
+  "reasons": [],
+  "evaluation_id": "uuid",
+  "action_id": "uuid"
+}
+```
+
+**Response Fields:**
+
+| Field | Description |
+|-------|-------------|
+| `safe` | `true` if action is safe to proceed |
+| `decision` | `"allow"`, `"require_hitl"`, or `"block"` |
+| `risk_tier` | `"low"`, `"medium"`, `"high"`, or `"critical"` |
+| `reasons` | Human-readable reasons for the decision |
+| `hitl_task_id` | ID of HITL task (if human review required) |
+
+### Full Evaluate Action
 
 ```bash
 POST /v1/actions/evaluate
 ```
 
-Evaluate an agent action through the safety pipeline.
+Full evaluation endpoint with complete action details.
 
 **Example - Small transfer (auto-approved):**
 
@@ -405,6 +491,80 @@ curl -X POST "http://localhost:8080/v1/hitl/tasks/{task_id}/decision" \
   }'
 ```
 
+### Activity Log / Actions History
+
+**List all actions (with filtering):**
+
+```bash
+curl "http://localhost:8080/v1/companies/{company_id}/actions?app_id={app_id}&limit=50" \
+  -H "Authorization: Bearer <jwt_token>"
+```
+
+**Query Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `app_id` | Filter by specific app |
+| `decision` | Filter: `allow`, `require_hitl`, `block` |
+| `risk_tier` | Filter: `low`, `medium`, `high`, `critical` |
+| `user_id` | Filter by user |
+| `search` | Search by user ID, trace ID, action type |
+| `time_range` | `24h`, `7d`, `30d`, `90d` |
+| `limit` / `offset` | Pagination |
+
+**Response:**
+```json
+{
+  "actions": [
+    {
+      "id": "uuid",
+      "trace_id": "trace-xxx",
+      "app_id": "uuid",
+      "app_name": "Mobile Banking App",
+      "user_id": "user-123",
+      "action_type": "transfer_funds",
+      "amount": 500.0,
+      "decision": "require_hitl",
+      "risk_tier": "high",
+      "reasons": ["Amount exceeds auto-approval limit"],
+      "created_at": "2024-01-15T10:30:00Z"
+    }
+  ],
+  "total": 150,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+### Company & App Management
+
+**Create a company:**
+```bash
+curl -X POST http://localhost:8080/v1/companies \
+  -H "Authorization: Bearer <jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Acme Inc"}'
+```
+
+**Create an app (generates API key):**
+```bash
+curl -X POST http://localhost:8080/v1/companies/{company_id}/apps \
+  -H "Authorization: Bearer <jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Mobile Banking App"}'
+```
+
+**Response (API key shown only once!):**
+```json
+{
+  "id": "uuid",
+  "name": "Mobile Banking App",
+  "api_key": "sk_live_abc123...",
+  "api_key_prefix": "sk_live_abc",
+  "status": "active"
+}
+```
+
 ### Health Check
 
 ```bash
@@ -420,16 +580,20 @@ Configuration is loaded from:
 
 ### Environment Variables
 
+Environment variables use `SHIELD_` prefix with `_` as the separator for nested keys.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SHIELD_SERVER__HOST` | `127.0.0.1` | Server bind address |
-| `SHIELD_SERVER__PORT` | `8080` | Server port |
-| `SHIELD_DATABASE__URL` | `sqlite:shield.db?mode=rwc` | Database connection string |
-| `SHIELD_SAFETY__MAX_AUTO_AMOUNT` | `100.0` | Max amount for auto-approval |
-| `SHIELD_SAFETY__HITL_THRESHOLD` | `1000.0` | Amount requiring HITL |
-| `SHIELD_AUTH__ENABLED` | `false` | Enable authentication |
-| `SHIELD_AUTH__JWT_SECRET` | (dev key) | JWT signing secret (CHANGE IN PROD) |
+| `SHIELD_SERVER_HOST` | `127.0.0.1` | Server bind address |
+| `SHIELD_SERVER_PORT` | `8080` | Server port |
+| `SHIELD_DATABASE_URL` | `sqlite:shield.db?mode=rwc` | Database connection string |
+| `SHIELD_SAFETY_MAX_AUTO_AMOUNT` | `100.0` | Max amount for auto-approval |
+| `SHIELD_SAFETY_HITL_THRESHOLD` | `1000.0` | Amount requiring HITL |
+| `SHIELD_AUTH_ENABLED` | `false` | Enable authentication |
+| `SHIELD_LLM_ENABLED` | `false` | Enable Llama Guard neural firewall |
 | `RUST_LOG` | `shield_core=info` | Log level |
+
+> **Note:** For config keys containing underscores (like `openrouter_api_key`, `jwt_secret`), use `config/local.yaml` instead of environment variables.
 
 ### Safety Thresholds
 
@@ -504,11 +668,15 @@ async function shieldApi(endpoint, options = {}) {
 ## Roadmap
 
 - [x] Authentication (API keys + JWT)
-- [ ] Neural prompt injection detector (PromptGuard integration)
+- [x] OAuth integration (Google, GitHub via NextAuth.js)
+- [x] Neural content safety (Llama Guard 4 via OpenRouter)
+- [x] Simple evaluate endpoint (`/v1/evaluate`)
+- [x] Activity log / audit trail
+- [x] Multi-tenant support (Companies, Apps)
 - [ ] LLM-based alignment judge
 - [ ] Rate limiting per user
 - [ ] Webhook notifications for HITL events
-- [ ] Admin UI (separate repo)
+- [x] Admin UI (Shield Console - separate repo)
 - [ ] Postgres support
 - [ ] Metrics endpoint (Prometheus)
 
