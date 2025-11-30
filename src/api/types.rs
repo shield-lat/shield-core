@@ -106,3 +106,36 @@ pub struct HealthResponse {
     pub timestamp: String,
 }
 
+// ==================== Authentication ====================
+
+/// Login request.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct LoginRequest {
+    /// User email.
+    pub email: String,
+    /// User password.
+    pub password: String,
+}
+
+/// Login response.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LoginResponse {
+    /// JWT token.
+    pub token: String,
+    /// User information.
+    pub user: UserInfo,
+    /// Token expiration in seconds.
+    pub expires_in: i64,
+}
+
+/// User information.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UserInfo {
+    /// User ID.
+    pub id: String,
+    /// User email.
+    pub email: String,
+    /// User role.
+    pub role: String,
+}
+

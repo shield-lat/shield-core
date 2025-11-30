@@ -48,8 +48,11 @@ Shield sits between LLM agents and financial execution APIs. The LLM/agent is tr
 # Clone and enter directory
 cd shield-core
 
-# Run with default config
+# Run with default config (auth disabled)
 cargo run
+
+# Run with authentication enabled
+SHIELD_AUTH__ENABLED=true cargo run
 
 # Or with custom config
 SHIELD_SERVER__PORT=3000 cargo run
@@ -60,6 +63,78 @@ The server starts at `http://127.0.0.1:8080` by default.
 ### Swagger UI
 
 API documentation is available at: `http://127.0.0.1:8080/swagger-ui/`
+
+## Authentication
+
+Shield supports two authentication methods:
+
+### 1. API Key (for Agents/LLMs)
+
+Used by agent clients to call `/v1/actions/evaluate`.
+
+```bash
+# Using X-API-Key header
+curl -X POST http://localhost:8080/v1/actions/evaluate \
+  -H "X-API-Key: sk-shield-dev-key-12345" \
+  -H "Content-Type: application/json" \
+  -d '{ ... }'
+
+# Or using Bearer token
+curl -X POST http://localhost:8080/v1/actions/evaluate \
+  -H "Authorization: Bearer sk-shield-dev-key-12345" \
+  -H "Content-Type: application/json" \
+  -d '{ ... }'
+```
+
+### 2. JWT (for Admin Console)
+
+Used by the web console to access HITL management endpoints.
+
+**Login to get a token:**
+
+```bash
+curl -X POST http://localhost:8080/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@shield.lat",
+    "password": "shield2024"
+  }'
+```
+
+Response:
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "user": {
+    "id": "user-admin-001",
+    "email": "admin@shield.lat",
+    "role": "admin"
+  },
+  "expires_in": 86400
+}
+```
+
+**Use the token for HITL endpoints:**
+
+```bash
+curl http://localhost:8080/v1/hitl/tasks \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```
+
+### Disabling Auth (Development)
+
+By default, authentication is disabled for easy development. Enable it for production:
+
+```yaml
+# config/local.yaml
+auth:
+  enabled: true
+```
+
+Or via environment variable:
+```bash
+SHIELD_AUTH__ENABLED=true cargo run
+```
 
 ## API Endpoints
 
@@ -224,6 +299,8 @@ Configuration is loaded from:
 | `SHIELD_DATABASE__URL` | `sqlite:shield.db?mode=rwc` | Database connection string |
 | `SHIELD_SAFETY__MAX_AUTO_AMOUNT` | `100.0` | Max amount for auto-approval |
 | `SHIELD_SAFETY__HITL_THRESHOLD` | `1000.0` | Amount requiring HITL |
+| `SHIELD_AUTH__ENABLED` | `false` | Enable authentication |
+| `SHIELD_AUTH__JWT_SECRET` | (dev key) | JWT signing secret (CHANGE IN PROD) |
 | `RUST_LOG` | `shield_core=info` | Log level |
 
 ### Safety Thresholds
@@ -267,8 +344,38 @@ The SQLite database is created automatically on first run. Schema is managed via
 
 For production, switch to Postgres by changing `SHIELD_DATABASE__URL` to a Postgres connection string.
 
+## Console Integration
+
+Shield is designed to work with a separate admin console (web UI). The console should:
+
+1. **Login**: `POST /v1/auth/login` with email/password to get JWT token
+2. **Store token**: Keep JWT in localStorage/sessionStorage
+3. **Use token**: Add `Authorization: Bearer <token>` header to all API calls
+4. **Handle expiry**: Refresh or re-login when token expires (24h default)
+
+Example fetch wrapper:
+```javascript
+async function shieldApi(endpoint, options = {}) {
+  const token = localStorage.getItem('shield_token');
+  const response = await fetch(`${SHIELD_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': token ? `Bearer ${token}` : undefined,
+      ...options.headers,
+    },
+  });
+  if (response.status === 401) {
+    // Redirect to login
+    window.location.href = '/login';
+  }
+  return response.json();
+}
+```
+
 ## Roadmap
 
+- [x] Authentication (API keys + JWT)
 - [ ] Neural prompt injection detector (PromptGuard integration)
 - [ ] LLM-based alignment judge
 - [ ] Rate limiting per user

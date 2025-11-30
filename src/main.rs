@@ -9,6 +9,7 @@ use sqlx::sqlite::SqlitePool;
 use tokio::net::TcpListener;
 
 mod api;
+mod auth;
 mod config;
 mod domain;
 mod engine;
@@ -17,6 +18,8 @@ mod logging;
 mod storage;
 
 use crate::api::build_router;
+use crate::api::handlers::AuthState;
+use crate::auth::{ApiKeyValidator, JwtManager, UserStore};
 use crate::config::Config;
 use crate::engine::{
     CompositeFirewall, ConfigPolicyEngine, EvaluationCoordinator, HeuristicAlignmentChecker,
@@ -50,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
         host = %config.server.host,
         port = %config.server.port,
         database = %config.database.url,
+        auth_enabled = %config.auth.enabled,
         "Configuration loaded"
     );
 
@@ -93,8 +97,37 @@ async fn main() -> anyhow::Result<()> {
         repository,
     };
 
+    // Build authentication components
+    let api_key_validator = ApiKeyValidator::new(config.auth.api_keys.clone());
+    let jwt_manager = JwtManager::new(
+        &config.auth.jwt_secret,
+        config.auth.jwt_issuer.clone(),
+        config.auth.token_duration_hours,
+    );
+    let user_store = UserStore::new(config.auth.users.clone());
+    let auth_state = AuthState {
+        jwt_manager: jwt_manager.clone(),
+        user_store,
+    };
+
+    if config.auth.enabled {
+        tracing::info!(
+            api_keys = config.auth.api_keys.len(),
+            users = config.auth.users.len(),
+            "Authentication enabled"
+        );
+    } else {
+        tracing::warn!("Authentication is DISABLED - enable for production");
+    }
+
     // Build router
-    let app = build_router(state);
+    let app = build_router(
+        state,
+        config.auth.enabled,
+        api_key_validator,
+        jwt_manager,
+        auth_state,
+    );
 
     // Start server
     let addr = format!("{}:{}", config.server.host, config.server.port);

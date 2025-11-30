@@ -7,9 +7,17 @@ use axum::{
 use uuid::Uuid;
 
 use crate::api::types::*;
+use crate::auth::{JwtManager, UserStore};
 use crate::domain::HitlStatus;
 use crate::error::{ShieldError, ShieldResult};
 use crate::AppState;
+
+/// Authentication state for login endpoint.
+#[derive(Clone)]
+pub struct AuthState {
+    pub jwt_manager: JwtManager,
+    pub user_store: UserStore,
+}
 
 /// Evaluate an agent action through the safety pipeline.
 ///
@@ -225,5 +233,77 @@ pub async fn health_check(State(state): State<AppState>) -> Json<HealthResponse>
         version: env!("CARGO_PKG_VERSION").to_string(),
         database: db_status,
         timestamp: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
+// ==================== Authentication Endpoints ====================
+
+/// Login to obtain a JWT token.
+///
+/// POST /v1/auth/login
+#[utoipa::path(
+    post,
+    path = "/v1/auth/login",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Login successful", body = LoginResponse),
+        (status = 401, description = "Invalid credentials")
+    ),
+    tag = "auth"
+)]
+pub async fn login(
+    State(auth_state): State<AuthState>,
+    Json(request): Json<LoginRequest>,
+) -> ShieldResult<Json<LoginResponse>> {
+    let user = auth_state
+        .user_store
+        .authenticate(&request.email, &request.password)
+        .ok_or_else(|| {
+            tracing::warn!(email = %request.email, "Failed login attempt");
+            ShieldError::BadRequest("Invalid email or password".to_string())
+        })?;
+
+    let token = auth_state
+        .jwt_manager
+        .generate_token(&user.id, &user.email, user.role)?;
+
+    tracing::info!(
+        user_id = %user.id,
+        email = %user.email,
+        role = ?user.role,
+        "User logged in"
+    );
+
+    Ok(Json(LoginResponse {
+        token,
+        user: UserInfo {
+            id: user.id.clone(),
+            email: user.email.clone(),
+            role: format!("{:?}", user.role).to_lowercase(),
+        },
+        expires_in: auth_state.jwt_manager.token_duration_hours() * 3600,
+    }))
+}
+
+/// Get current user info from JWT token.
+///
+/// GET /v1/auth/me
+#[utoipa::path(
+    get,
+    path = "/v1/auth/me",
+    responses(
+        (status = 200, description = "Current user info", body = UserInfo),
+        (status = 401, description = "Not authenticated")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "auth"
+)]
+pub async fn get_current_user(
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+) -> Json<UserInfo> {
+    Json(UserInfo {
+        id: claims.sub,
+        email: claims.email,
+        role: format!("{:?}", claims.role).to_lowercase(),
     })
 }

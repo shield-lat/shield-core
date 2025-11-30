@@ -26,6 +26,36 @@ safety:
     - "act as if"
     - "forget your instructions"
 
+# Authentication settings
+auth:
+  # Set to true to enable authentication (recommended for production)
+  enabled: false
+  
+  # JWT secret - MUST be changed in production via SHIELD_AUTH__JWT_SECRET env var
+  jwt_secret: "CHANGE_ME_IN_PRODUCTION_shield_jwt_secret_key_2024"
+  jwt_issuer: "shield-core"
+  token_duration_hours: 24
+  
+  # API keys for agent/LLM clients
+  # In production, manage these via database or secrets manager
+  api_keys:
+    - id: "key-dev-001"
+      # Default dev key - remove or rotate in production
+      key: "sk-shield-dev-key-12345"
+      name: "Development Agent"
+      client_id: "dev-agent"
+      rate_limit: 100
+  
+  # Admin console users
+  # Password hashes are SHA256 hex. Generate with: echo -n "password" | shasum -a 256
+  users:
+    - id: "user-admin-001"
+      email: "admin@shield.lat"
+      # Default password: "shield2024" - CHANGE IN PRODUCTION
+      # echo -n "shield2024" | shasum -a 256
+      password_hash: "2ae2107409cfc29923bd8429b398786c5bf41ea4bb0eccd3c5b11af42ca3fba3"
+      role: admin
+
 # Future: LLM integration settings (not implemented in MVP)
 # llm:
 #   alignment_checker_endpoint: ""

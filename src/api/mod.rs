@@ -2,7 +2,7 @@
 //!
 //! Provides REST endpoints for action evaluation and HITL management.
 
-mod handlers;
+pub mod handlers;
 mod routes;
 mod types;
 

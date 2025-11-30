@@ -5,12 +5,16 @@
 use config::{Config as ConfigLoader, ConfigError, Environment, File};
 use serde::Deserialize;
 
+use crate::auth::{ConfiguredApiKey, ConfiguredUser};
+
 /// Root configuration structure.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
     pub safety: SafetyConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
 }
 
 /// Server configuration.
@@ -39,6 +43,59 @@ pub struct SafetyConfig {
     /// Keywords that trigger firewall suspicion.
     #[serde(default)]
     pub suspicious_keywords: Vec<String>,
+}
+
+/// Authentication configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthConfig {
+    /// Whether authentication is enabled.
+    #[serde(default = "default_auth_enabled")]
+    pub enabled: bool,
+    /// JWT secret for signing tokens.
+    #[serde(default = "default_jwt_secret")]
+    pub jwt_secret: String,
+    /// JWT issuer claim.
+    #[serde(default = "default_jwt_issuer")]
+    pub jwt_issuer: String,
+    /// JWT token validity in hours.
+    #[serde(default = "default_token_duration")]
+    pub token_duration_hours: i64,
+    /// Configured API keys for agents.
+    #[serde(default)]
+    pub api_keys: Vec<ConfiguredApiKey>,
+    /// Configured admin users.
+    #[serde(default)]
+    pub users: Vec<ConfiguredUser>,
+}
+
+fn default_auth_enabled() -> bool {
+    false
+}
+
+fn default_jwt_secret() -> String {
+    // In production, this MUST be overridden via env var
+    "CHANGE_ME_IN_PRODUCTION_shield_jwt_secret_key_2024".to_string()
+}
+
+fn default_jwt_issuer() -> String {
+    "shield-core".to_string()
+}
+
+fn default_token_duration() -> i64 {
+    24
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_auth_enabled(),
+            jwt_secret: default_jwt_secret(),
+            jwt_issuer: default_jwt_issuer(),
+            token_duration_hours: default_token_duration(),
+            api_keys: Vec::new(),
+            users: Vec::new(),
+        }
+    }
 }
 
 impl Config {
