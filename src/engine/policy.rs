@@ -63,7 +63,10 @@ impl PolicyOutcome {
 
     /// Get rule IDs that triggered.
     pub fn rule_ids(&self) -> Vec<String> {
-        self.triggered_rules.iter().map(|r| r.rule_id.clone()).collect()
+        self.triggered_rules
+            .iter()
+            .map(|r| r.rule_id.clone())
+            .collect()
     }
 
     /// Get human-readable descriptions of triggered rules.
@@ -91,6 +94,89 @@ pub struct ConfigPolicyEngine {
 impl ConfigPolicyEngine {
     pub fn new(config: SafetyConfig) -> Self {
         Self { config }
+    }
+
+    /// Extract amount from natural language text.
+    /// Looks for patterns like "$1000", "1000 dollars", "1,000", etc.
+    fn extract_amount_from_text(text: &str) -> Option<f64> {
+        let text_lower = text.to_lowercase();
+
+        // Pattern 1: $1,000 or $1000 or $1000.00
+        if let Some(idx) = text.find('$') {
+            let after_dollar = &text[idx + 1..];
+            let amount_str: String = after_dollar
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == ',' || *c == '.')
+                .filter(|c| *c != ',')
+                .collect();
+            if let Ok(amount) = amount_str.parse::<f64>() {
+                if amount > 0.0 {
+                    return Some(amount);
+                }
+            }
+        }
+
+        // Pattern 2: "1000 dollars" or "1,000 dollars"
+        let words: Vec<&str> = text_lower.split_whitespace().collect();
+        for (i, word) in words.iter().enumerate() {
+            if *word == "dollars" || *word == "dollar" || *word == "usd" {
+                if i > 0 {
+                    let amount_str: String = words[i - 1]
+                        .chars()
+                        .filter(|c| c.is_ascii_digit() || *c == '.')
+                        .collect();
+                    if let Ok(amount) = amount_str.parse::<f64>() {
+                        if amount > 0.0 {
+                            return Some(amount);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Pattern 3: Just a number after "transfer" or "send" or "pay"
+        let financial_verbs = ["transfer", "send", "pay", "wire", "withdraw"];
+        for verb in financial_verbs {
+            if let Some(verb_idx) = text_lower.find(verb) {
+                let after_verb = &text_lower[verb_idx + verb.len()..];
+                // Find the first number sequence using char_indices for proper byte positions
+                let mut num_start_byte = None;
+                for (byte_idx, c) in after_verb.char_indices() {
+                    if c.is_ascii_digit() {
+                        if num_start_byte.is_none() {
+                            num_start_byte = Some(byte_idx);
+                        }
+                    } else if num_start_byte.is_some() && c != ',' && c != '.' {
+                        let start = num_start_byte.unwrap();
+                        let amount_str: String = after_verb[start..byte_idx]
+                            .chars()
+                            .filter(|c| c.is_ascii_digit() || *c == '.')
+                            .collect();
+                        if let Ok(amount) = amount_str.parse::<f64>() {
+                            if amount > 0.0 {
+                                return Some(amount);
+                            }
+                        }
+                        break;
+                    }
+                }
+                // Handle case where number is at end of string
+                if let Some(start) = num_start_byte {
+                    let amount_str: String = after_verb[start..]
+                        .chars()
+                        .take_while(|c| c.is_ascii_digit() || *c == ',' || *c == '.')
+                        .filter(|c| *c != ',')
+                        .collect();
+                    if let Ok(amount) = amount_str.parse::<f64>() {
+                        if amount > 0.0 {
+                            return Some(amount);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     /// Check amount-based rules for monetary actions.
@@ -201,7 +287,8 @@ impl ConfigPolicyEngine {
             ActionType::CloseAccount => {
                 rules.push(TriggeredRule {
                     rule_id: "ACTION_CLOSE_ACCOUNT".to_string(),
-                    description: "Account closure is a critical action requiring review".to_string(),
+                    description: "Account closure is a critical action requiring review"
+                        .to_string(),
                     suggests_block: false,
                     requires_hitl: true,
                 });
@@ -231,14 +318,85 @@ impl ConfigPolicyEngine {
                 });
             }
             ActionType::Unknown => {
-                // Only flag unknown actions if they contain financial data
-                // Simple messages like "hello" should pass through
-                if let Some(amount) = action.extract_amount() {
-                    if amount > 0.0 {
+                // Analyze the input text for financial intent
+                let intent_lower = action.original_intent.to_lowercase();
+
+                // Check for financial keywords
+                let financial_keywords = [
+                    "transfer",
+                    "send",
+                    "pay",
+                    "wire",
+                    "withdraw",
+                    "deposit",
+                    "move money",
+                    "move funds",
+                    "payment",
+                    "transaction",
+                ];
+                let has_financial_keyword = financial_keywords
+                    .iter()
+                    .any(|kw| intent_lower.contains(kw));
+
+                // Extract amount from text using regex-like pattern matching
+                let amount_from_text = Self::extract_amount_from_text(&action.original_intent);
+
+                // Check payload amount as fallback
+                let amount_from_payload = action.extract_amount();
+                let detected_amount = amount_from_text.or(amount_from_payload);
+
+                if has_financial_keyword {
+                    if let Some(amount) = detected_amount {
+                        // Financial keyword + amount = definitely needs review
+                        if amount > self.config.hitl_threshold {
+                            rules.push(TriggeredRule {
+                                rule_id: "UNCLASSIFIED_HIGH_VALUE_TRANSFER".to_string(),
+                                description: format!(
+                                    "Unclassified financial action with ${:.2} exceeds threshold - BLOCKED",
+                                    amount
+                                ),
+                                suggests_block: true,
+                                requires_hitl: false,
+                            });
+                        } else if amount > self.config.max_auto_amount {
+                            rules.push(TriggeredRule {
+                                rule_id: "UNCLASSIFIED_TRANSFER_NEEDS_REVIEW".to_string(),
+                                description: format!(
+                                    "Unclassified financial action with ${:.2} requires human review",
+                                    amount
+                                ),
+                                suggests_block: false,
+                                requires_hitl: true,
+                            });
+                        } else {
+                            rules.push(TriggeredRule {
+                                rule_id: "UNCLASSIFIED_SMALL_TRANSFER".to_string(),
+                                description: format!(
+                                    "Unclassified financial action with ${:.2} - flagged for monitoring",
+                                    amount
+                                ),
+                                suggests_block: false,
+                                requires_hitl: false,
+                            });
+                        }
+                    } else {
+                        // Financial keyword but no amount - suspicious
                         rules.push(TriggeredRule {
-                            rule_id: "ACTION_TYPE_UNKNOWN_WITH_AMOUNT".to_string(),
+                            rule_id: "UNCLASSIFIED_FINANCIAL_INTENT".to_string(),
+                            description:
+                                "Unclassified action with financial keywords requires review"
+                                    .to_string(),
+                            suggests_block: false,
+                            requires_hitl: true,
+                        });
+                    }
+                } else if let Some(amount) = detected_amount {
+                    // No financial keyword but has amount - flag for review if significant
+                    if amount > self.config.max_auto_amount {
+                        rules.push(TriggeredRule {
+                            rule_id: "UNCLASSIFIED_AMOUNT_DETECTED".to_string(),
                             description: format!(
-                                "Unknown action type with amount ${:.2} requires review",
+                                "Unclassified action mentions ${:.2} - requires review",
                                 amount
                             ),
                             suggests_block: false,
@@ -246,7 +404,7 @@ impl ConfigPolicyEngine {
                         });
                     }
                 }
-                // Unknown actions without amounts are allowed (conversational/info queries)
+                // No financial keywords and no amounts = allow (conversational)
             }
             // Read-only actions are generally safe
             ActionType::GetBalance | ActionType::GetTransactions => {}
@@ -327,8 +485,13 @@ mod tests {
         let action = make_transfer(500.0);
 
         let result = engine.evaluate_policies(&action);
-        assert_eq!(result.strictest_decision(), Some(DecisionStatus::RequireHitl));
-        assert!(result.rule_ids().contains(&"AMOUNT_EXCEEDS_AUTO_LIMIT".to_string()));
+        assert_eq!(
+            result.strictest_decision(),
+            Some(DecisionStatus::RequireHitl)
+        );
+        assert!(result
+            .rule_ids()
+            .contains(&"AMOUNT_EXCEEDS_AUTO_LIMIT".to_string()));
     }
 
     #[test]
@@ -337,8 +500,13 @@ mod tests {
         let action = make_transfer(5000.0);
 
         let result = engine.evaluate_policies(&action);
-        assert_eq!(result.strictest_decision(), Some(DecisionStatus::RequireHitl));
-        assert!(result.rule_ids().contains(&"AMOUNT_EXCEEDS_HITL_THRESHOLD".to_string()));
+        assert_eq!(
+            result.strictest_decision(),
+            Some(DecisionStatus::RequireHitl)
+        );
+        assert!(result
+            .rule_ids()
+            .contains(&"AMOUNT_EXCEEDS_HITL_THRESHOLD".to_string()));
     }
 
     #[test]
@@ -388,4 +556,3 @@ mod tests {
         assert_eq!(result.strictest_decision(), Some(DecisionStatus::Allow));
     }
 }
-
