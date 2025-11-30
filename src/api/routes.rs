@@ -2,7 +2,7 @@
 
 use axum::{
     middleware,
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
 };
 use tower_http::cors::{Any, CorsLayer};
@@ -51,6 +51,22 @@ impl Modify for SecurityAddon {
         handlers::health_check,
         handlers::login,
         handlers::get_current_user,
+        // Company endpoints
+        handlers::create_company,
+        handlers::list_companies,
+        handlers::get_company,
+        handlers::update_company,
+        handlers::delete_company,
+        handlers::list_company_members,
+        handlers::add_company_member,
+        handlers::update_member_role,
+        handlers::remove_company_member,
+        // App endpoints
+        handlers::list_company_apps,
+        handlers::create_app,
+        handlers::get_app,
+        handlers::update_app,
+        handlers::delete_app,
     ),
     components(schemas(
         crate::api::types::EvaluateActionRequest,
@@ -64,6 +80,21 @@ impl Modify for SecurityAddon {
         crate::api::types::LoginRequest,
         crate::api::types::LoginResponse,
         crate::api::types::UserInfo,
+        // Company types
+        crate::api::types::CreateCompanyRequest,
+        crate::api::types::UpdateCompanyRequest,
+        crate::api::types::CompanyResponse,
+        crate::api::types::ListCompaniesResponse,
+        crate::api::types::AddMemberRequest,
+        crate::api::types::UpdateMemberRoleRequest,
+        crate::api::types::MemberResponse,
+        crate::api::types::ListMembersResponse,
+        crate::api::types::CreateAppRequest,
+        crate::api::types::UpdateAppRequest,
+        crate::api::types::CreateAppResponse,
+        crate::api::types::AppResponse,
+        crate::api::types::ListAppsResponse,
+        // Domain types
         crate::domain::AgentAction,
         crate::domain::ActionType,
         crate::domain::EvaluationResult,
@@ -76,12 +107,19 @@ impl Modify for SecurityAddon {
         crate::domain::TransferFundsPayload,
         crate::domain::GetBalancePayload,
         crate::domain::PayBillPayload,
+        crate::domain::Company,
+        crate::domain::CompanyMember,
+        crate::domain::CompanyRole,
+        crate::domain::App,
+        crate::domain::AppStatus,
     )),
     modifiers(&SecurityAddon),
     tags(
         (name = "actions", description = "Action evaluation endpoints"),
         (name = "hitl", description = "Human-in-the-loop task management"),
         (name = "auth", description = "Authentication endpoints"),
+        (name = "companies", description = "Company management"),
+        (name = "apps", description = "App/API key management"),
         (name = "health", description = "Health and status endpoints")
     ),
     info(
@@ -132,13 +170,45 @@ fn build_authenticated_router(
 
     // Routes requiring JWT (for admin console)
     let admin_routes = Router::new()
+        // HITL routes
         .route("/v1/hitl/tasks", get(handlers::list_hitl_tasks))
         .route("/v1/hitl/tasks/{id}", get(handlers::get_hitl_task))
         .route(
             "/v1/hitl/tasks/{id}/decision",
             post(handlers::submit_hitl_decision),
         )
+        // Auth routes
         .route("/v1/auth/me", get(handlers::get_current_user))
+        // Company routes
+        .route(
+            "/v1/companies",
+            get(handlers::list_companies).post(handlers::create_company),
+        )
+        .route(
+            "/v1/companies/{id}",
+            get(handlers::get_company)
+                .put(handlers::update_company)
+                .delete(handlers::delete_company),
+        )
+        .route(
+            "/v1/companies/{id}/members",
+            get(handlers::list_company_members).post(handlers::add_company_member),
+        )
+        .route(
+            "/v1/companies/{company_id}/members/{user_id}",
+            put(handlers::update_member_role).delete(handlers::remove_company_member),
+        )
+        // App routes
+        .route(
+            "/v1/companies/{id}/apps",
+            get(handlers::list_company_apps).post(handlers::create_app),
+        )
+        .route(
+            "/v1/companies/{company_id}/apps/{app_id}",
+            get(handlers::get_app)
+                .put(handlers::update_app)
+                .delete(handlers::delete_app),
+        )
         .layer(middleware::from_fn_with_state(
             jwt_manager.clone(),
             require_jwt,
@@ -172,6 +242,36 @@ fn build_unauthenticated_router(state: AppState, auth_state: AuthState, cors: Co
         .route(
             "/v1/hitl/tasks/{id}/decision",
             post(handlers::submit_hitl_decision),
+        )
+        // Company routes
+        .route(
+            "/v1/companies",
+            get(handlers::list_companies).post(handlers::create_company),
+        )
+        .route(
+            "/v1/companies/{id}",
+            get(handlers::get_company)
+                .put(handlers::update_company)
+                .delete(handlers::delete_company),
+        )
+        .route(
+            "/v1/companies/{id}/members",
+            get(handlers::list_company_members).post(handlers::add_company_member),
+        )
+        .route(
+            "/v1/companies/{company_id}/members/{user_id}",
+            put(handlers::update_member_role).delete(handlers::remove_company_member),
+        )
+        // App routes
+        .route(
+            "/v1/companies/{id}/apps",
+            get(handlers::list_company_apps).post(handlers::create_app),
+        )
+        .route(
+            "/v1/companies/{company_id}/apps/{app_id}",
+            get(handlers::get_app)
+                .put(handlers::update_app)
+                .delete(handlers::delete_app),
         )
         // Health
         .route("/v1/health", get(handlers::health_check))

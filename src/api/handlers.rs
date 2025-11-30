@@ -307,3 +307,740 @@ pub async fn get_current_user(
         role: format!("{:?}", claims.role).to_lowercase(),
     })
 }
+
+// ==================== Company Endpoints ====================
+
+use crate::domain::{App, Company, CompanyMember, CompanyRole};
+
+/// Create a new company.
+///
+/// POST /v1/companies
+#[utoipa::path(
+    post,
+    path = "/v1/companies",
+    request_body = CreateCompanyRequest,
+    responses(
+        (status = 201, description = "Company created", body = CompanyResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Not authenticated")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "companies"
+)]
+pub async fn create_company(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Json(request): Json<CreateCompanyRequest>,
+) -> ShieldResult<(axum::http::StatusCode, Json<CompanyResponse>)> {
+    if request.name.trim().is_empty() {
+        return Err(ShieldError::BadRequest(
+            "Company name is required".to_string(),
+        ));
+    }
+
+    let slug = Company::slugify(&request.name);
+
+    // Check if slug is already taken
+    if state.repository.get_company_by_slug(&slug).await.is_ok() {
+        return Err(ShieldError::BadRequest(format!(
+            "A company with slug '{}' already exists",
+            slug
+        )));
+    }
+
+    let company = Company::new(request.name, slug, request.description);
+    state.repository.create_company(&company).await?;
+
+    // Add the creator as owner
+    let member = CompanyMember::new(
+        company.id,
+        claims.sub.clone(),
+        claims.email.clone(),
+        CompanyRole::Owner,
+    );
+    state.repository.add_company_member(&member).await?;
+
+    tracing::info!(
+        company_id = %company.id,
+        company_name = %company.name,
+        owner_id = %claims.sub,
+        "Company created"
+    );
+
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(CompanyResponse { company }),
+    ))
+}
+
+/// List companies for the current user.
+///
+/// GET /v1/companies
+#[utoipa::path(
+    get,
+    path = "/v1/companies",
+    responses(
+        (status = 200, description = "List of companies", body = ListCompaniesResponse),
+        (status = 401, description = "Not authenticated")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "companies"
+)]
+pub async fn list_companies(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+) -> ShieldResult<Json<ListCompaniesResponse>> {
+    let companies = state.repository.list_user_companies(&claims.sub).await?;
+
+    Ok(Json(ListCompaniesResponse { companies }))
+}
+
+/// Get a company by ID.
+///
+/// GET /v1/companies/{id}
+#[utoipa::path(
+    get,
+    path = "/v1/companies/{id}",
+    params(("id" = Uuid, Path, description = "Company ID")),
+    responses(
+        (status = 200, description = "Company details", body = CompanyResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not a member of this company"),
+        (status = 404, description = "Company not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "companies"
+)]
+pub async fn get_company(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+) -> ShieldResult<Json<CompanyResponse>> {
+    // Verify user is a member
+    let _ = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    let company = state.repository.get_company(id).await?;
+
+    Ok(Json(CompanyResponse { company }))
+}
+
+/// Update a company.
+///
+/// PUT /v1/companies/{id}
+#[utoipa::path(
+    put,
+    path = "/v1/companies/{id}",
+    params(("id" = Uuid, Path, description = "Company ID")),
+    request_body = UpdateCompanyRequest,
+    responses(
+        (status = 200, description = "Company updated", body = CompanyResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Company not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "companies"
+)]
+pub async fn update_company(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+    Json(request): Json<UpdateCompanyRequest>,
+) -> ShieldResult<Json<CompanyResponse>> {
+    // Verify user has admin/owner role
+    let member = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    if !matches!(member.role, CompanyRole::Owner | CompanyRole::Admin) {
+        return Err(ShieldError::Forbidden(
+            "Only owners and admins can update company".to_string(),
+        ));
+    }
+
+    let company = state
+        .repository
+        .update_company(id, request.name.as_deref(), request.description.as_deref())
+        .await?;
+
+    tracing::info!(
+        company_id = %id,
+        updated_by = %claims.sub,
+        "Company updated"
+    );
+
+    Ok(Json(CompanyResponse { company }))
+}
+
+/// Delete a company.
+///
+/// DELETE /v1/companies/{id}
+#[utoipa::path(
+    delete,
+    path = "/v1/companies/{id}",
+    params(("id" = Uuid, Path, description = "Company ID")),
+    responses(
+        (status = 204, description = "Company deleted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Company not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "companies"
+)]
+pub async fn delete_company(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+) -> ShieldResult<axum::http::StatusCode> {
+    // Only owners can delete
+    let member = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    if member.role != CompanyRole::Owner {
+        return Err(ShieldError::Forbidden(
+            "Only owners can delete a company".to_string(),
+        ));
+    }
+
+    state.repository.delete_company(id).await?;
+
+    tracing::info!(
+        company_id = %id,
+        deleted_by = %claims.sub,
+        "Company deleted"
+    );
+
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+// ==================== Company Member Endpoints ====================
+
+/// List members of a company.
+///
+/// GET /v1/companies/{id}/members
+#[utoipa::path(
+    get,
+    path = "/v1/companies/{id}/members",
+    params(("id" = Uuid, Path, description = "Company ID")),
+    responses(
+        (status = 200, description = "List of members", body = ListMembersResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not a member of this company"),
+        (status = 404, description = "Company not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "companies"
+)]
+pub async fn list_company_members(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+) -> ShieldResult<Json<ListMembersResponse>> {
+    // Verify user is a member
+    let _ = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    let members = state.repository.list_company_members(id).await?;
+
+    Ok(Json(ListMembersResponse { members }))
+}
+
+/// Add a member to a company.
+///
+/// POST /v1/companies/{id}/members
+#[utoipa::path(
+    post,
+    path = "/v1/companies/{id}/members",
+    params(("id" = Uuid, Path, description = "Company ID")),
+    request_body = AddMemberRequest,
+    responses(
+        (status = 201, description = "Member added", body = MemberResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Company not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "companies"
+)]
+pub async fn add_company_member(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+    Json(request): Json<AddMemberRequest>,
+) -> ShieldResult<(axum::http::StatusCode, Json<MemberResponse>)> {
+    // Verify user has admin/owner role
+    let member = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    if !matches!(member.role, CompanyRole::Owner | CompanyRole::Admin) {
+        return Err(ShieldError::Forbidden(
+            "Only owners and admins can add members".to_string(),
+        ));
+    }
+
+    // Cannot add owner role unless current user is owner
+    if request.role == CompanyRole::Owner && member.role != CompanyRole::Owner {
+        return Err(ShieldError::Forbidden(
+            "Only owners can add other owners".to_string(),
+        ));
+    }
+
+    let new_member = CompanyMember::new(id, request.user_id, request.email, request.role);
+    state.repository.add_company_member(&new_member).await?;
+
+    tracing::info!(
+        company_id = %id,
+        new_member_id = %new_member.user_id,
+        role = %new_member.role,
+        added_by = %claims.sub,
+        "Member added to company"
+    );
+
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(MemberResponse { member: new_member }),
+    ))
+}
+
+/// Update a member's role.
+///
+/// PUT /v1/companies/{company_id}/members/{user_id}
+#[utoipa::path(
+    put,
+    path = "/v1/companies/{company_id}/members/{user_id}",
+    params(
+        ("company_id" = Uuid, Path, description = "Company ID"),
+        ("user_id" = String, Path, description = "User ID to update")
+    ),
+    request_body = UpdateMemberRoleRequest,
+    responses(
+        (status = 200, description = "Member role updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Member not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "companies"
+)]
+pub async fn update_member_role(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path((company_id, user_id)): Path<(Uuid, String)>,
+    Json(request): Json<UpdateMemberRoleRequest>,
+) -> ShieldResult<Json<MemberResponse>> {
+    // Verify user has owner role (only owners can change roles)
+    let member = state
+        .repository
+        .get_company_member(company_id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    if member.role != CompanyRole::Owner {
+        return Err(ShieldError::Forbidden(
+            "Only owners can change member roles".to_string(),
+        ));
+    }
+
+    // Cannot demote yourself as the last owner
+    if user_id == claims.sub && request.role != CompanyRole::Owner {
+        let members = state.repository.list_company_members(company_id).await?;
+        let owner_count = members
+            .iter()
+            .filter(|m| m.role == CompanyRole::Owner)
+            .count();
+        if owner_count <= 1 {
+            return Err(ShieldError::BadRequest(
+                "Cannot demote the last owner. Assign another owner first.".to_string(),
+            ));
+        }
+    }
+
+    state
+        .repository
+        .update_member_role(company_id, &user_id, request.role)
+        .await?;
+    let updated_member = state
+        .repository
+        .get_company_member(company_id, &user_id)
+        .await?;
+
+    tracing::info!(
+        company_id = %company_id,
+        target_user_id = %user_id,
+        new_role = %request.role,
+        updated_by = %claims.sub,
+        "Member role updated"
+    );
+
+    Ok(Json(MemberResponse {
+        member: updated_member,
+    }))
+}
+
+/// Remove a member from a company.
+///
+/// DELETE /v1/companies/{company_id}/members/{user_id}
+#[utoipa::path(
+    delete,
+    path = "/v1/companies/{company_id}/members/{user_id}",
+    params(
+        ("company_id" = Uuid, Path, description = "Company ID"),
+        ("user_id" = String, Path, description = "User ID to remove")
+    ),
+    responses(
+        (status = 204, description = "Member removed"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Member not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "companies"
+)]
+pub async fn remove_company_member(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path((company_id, user_id)): Path<(Uuid, String)>,
+) -> ShieldResult<axum::http::StatusCode> {
+    // Verify user has admin/owner role
+    let member = state
+        .repository
+        .get_company_member(company_id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    if !matches!(member.role, CompanyRole::Owner | CompanyRole::Admin) {
+        return Err(ShieldError::Forbidden(
+            "Only owners and admins can remove members".to_string(),
+        ));
+    }
+
+    // Get target member to check their role
+    let target = state
+        .repository
+        .get_company_member(company_id, &user_id)
+        .await?;
+
+    // Admins cannot remove owners
+    if target.role == CompanyRole::Owner && member.role != CompanyRole::Owner {
+        return Err(ShieldError::Forbidden(
+            "Admins cannot remove owners".to_string(),
+        ));
+    }
+
+    // Cannot remove yourself if you're the last owner
+    if user_id == claims.sub && target.role == CompanyRole::Owner {
+        let members = state.repository.list_company_members(company_id).await?;
+        let owner_count = members
+            .iter()
+            .filter(|m| m.role == CompanyRole::Owner)
+            .count();
+        if owner_count <= 1 {
+            return Err(ShieldError::BadRequest(
+                "Cannot remove the last owner. Assign another owner first or delete the company."
+                    .to_string(),
+            ));
+        }
+    }
+
+    state
+        .repository
+        .remove_company_member(company_id, &user_id)
+        .await?;
+
+    tracing::info!(
+        company_id = %company_id,
+        removed_user_id = %user_id,
+        removed_by = %claims.sub,
+        "Member removed from company"
+    );
+
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+// ==================== App Endpoints ====================
+
+/// List apps for a company.
+///
+/// GET /v1/companies/{id}/apps
+#[utoipa::path(
+    get,
+    path = "/v1/companies/{id}/apps",
+    params(("id" = Uuid, Path, description = "Company ID")),
+    responses(
+        (status = 200, description = "List of apps", body = ListAppsResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not a member of this company"),
+        (status = 404, description = "Company not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "apps"
+)]
+pub async fn list_company_apps(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+) -> ShieldResult<Json<ListAppsResponse>> {
+    // Verify user is a member
+    let _ = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    let apps = state.repository.list_company_apps(id).await?;
+
+    Ok(Json(ListAppsResponse { apps }))
+}
+
+/// Create a new app for a company.
+///
+/// POST /v1/companies/{id}/apps
+#[utoipa::path(
+    post,
+    path = "/v1/companies/{id}/apps",
+    params(("id" = Uuid, Path, description = "Company ID")),
+    request_body = CreateAppRequest,
+    responses(
+        (status = 201, description = "App created", body = CreateAppResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Company not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "apps"
+)]
+pub async fn create_app(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+    Json(request): Json<CreateAppRequest>,
+) -> ShieldResult<(axum::http::StatusCode, Json<CreateAppResponse>)> {
+    // Verify user has admin/owner role
+    let member = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    if !matches!(member.role, CompanyRole::Owner | CompanyRole::Admin) {
+        return Err(ShieldError::Forbidden(
+            "Only owners and admins can create apps".to_string(),
+        ));
+    }
+
+    if request.name.trim().is_empty() {
+        return Err(ShieldError::BadRequest("App name is required".to_string()));
+    }
+
+    let app = App::new(id, request.name, request.description, request.rate_limit);
+    let api_key = app.api_key.clone().expect("New app should have API key");
+    let api_key_hash = App::hash_api_key(&api_key);
+
+    state.repository.create_app(&app, &api_key_hash).await?;
+
+    tracing::info!(
+        app_id = %app.id,
+        company_id = %id,
+        app_name = %app.name,
+        created_by = %claims.sub,
+        "App created"
+    );
+
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(CreateAppResponse {
+            app,
+            api_key,
+            warning: "Save this API key now. It won't be shown again!".to_string(),
+        }),
+    ))
+}
+
+/// Get an app by ID.
+///
+/// GET /v1/companies/{company_id}/apps/{app_id}
+#[utoipa::path(
+    get,
+    path = "/v1/companies/{company_id}/apps/{app_id}",
+    params(
+        ("company_id" = Uuid, Path, description = "Company ID"),
+        ("app_id" = Uuid, Path, description = "App ID")
+    ),
+    responses(
+        (status = 200, description = "App details", body = AppResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not a member of this company"),
+        (status = 404, description = "App not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "apps"
+)]
+pub async fn get_app(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path((company_id, app_id)): Path<(Uuid, Uuid)>,
+) -> ShieldResult<Json<AppResponse>> {
+    // Verify user is a member
+    let _ = state
+        .repository
+        .get_company_member(company_id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    let app = state.repository.get_app(app_id).await?;
+
+    // Verify app belongs to this company
+    if app.company_id != company_id {
+        return Err(ShieldError::NotFound(format!(
+            "App {} not found in company",
+            app_id
+        )));
+    }
+
+    Ok(Json(AppResponse { app }))
+}
+
+/// Update an app.
+///
+/// PUT /v1/companies/{company_id}/apps/{app_id}
+#[utoipa::path(
+    put,
+    path = "/v1/companies/{company_id}/apps/{app_id}",
+    params(
+        ("company_id" = Uuid, Path, description = "Company ID"),
+        ("app_id" = Uuid, Path, description = "App ID")
+    ),
+    request_body = UpdateAppRequest,
+    responses(
+        (status = 200, description = "App updated", body = AppResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "App not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "apps"
+)]
+pub async fn update_app(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path((company_id, app_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<UpdateAppRequest>,
+) -> ShieldResult<Json<AppResponse>> {
+    // Verify user has admin/owner role
+    let member = state
+        .repository
+        .get_company_member(company_id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    if !matches!(member.role, CompanyRole::Owner | CompanyRole::Admin) {
+        return Err(ShieldError::Forbidden(
+            "Only owners and admins can update apps".to_string(),
+        ));
+    }
+
+    // Verify app belongs to this company
+    let existing = state.repository.get_app(app_id).await?;
+    if existing.company_id != company_id {
+        return Err(ShieldError::NotFound(format!(
+            "App {} not found in company",
+            app_id
+        )));
+    }
+
+    let app = state
+        .repository
+        .update_app(
+            app_id,
+            request.name.as_deref(),
+            request.description.as_deref(),
+            request.status,
+            request.rate_limit,
+        )
+        .await?;
+
+    tracing::info!(
+        app_id = %app_id,
+        company_id = %company_id,
+        updated_by = %claims.sub,
+        "App updated"
+    );
+
+    Ok(Json(AppResponse { app }))
+}
+
+/// Delete an app.
+///
+/// DELETE /v1/companies/{company_id}/apps/{app_id}
+#[utoipa::path(
+    delete,
+    path = "/v1/companies/{company_id}/apps/{app_id}",
+    params(
+        ("company_id" = Uuid, Path, description = "Company ID"),
+        ("app_id" = Uuid, Path, description = "App ID")
+    ),
+    responses(
+        (status = 204, description = "App deleted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "App not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "apps"
+)]
+pub async fn delete_app(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path((company_id, app_id)): Path<(Uuid, Uuid)>,
+) -> ShieldResult<axum::http::StatusCode> {
+    // Verify user has admin/owner role
+    let member = state
+        .repository
+        .get_company_member(company_id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    if !matches!(member.role, CompanyRole::Owner | CompanyRole::Admin) {
+        return Err(ShieldError::Forbidden(
+            "Only owners and admins can delete apps".to_string(),
+        ));
+    }
+
+    // Verify app belongs to this company
+    let existing = state.repository.get_app(app_id).await?;
+    if existing.company_id != company_id {
+        return Err(ShieldError::NotFound(format!(
+            "App {} not found in company",
+            app_id
+        )));
+    }
+
+    state.repository.delete_app(app_id).await?;
+
+    tracing::info!(
+        app_id = %app_id,
+        company_id = %company_id,
+        deleted_by = %claims.sub,
+        "App deleted"
+    );
+
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}

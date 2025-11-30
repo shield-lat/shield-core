@@ -19,6 +19,12 @@ pub enum ShieldError {
     #[error("Invalid request: {0}")]
     BadRequest(String),
 
+    #[error("Unauthorized: {0}")]
+    Unauthorized(String),
+
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
+
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
 
@@ -47,6 +53,12 @@ impl IntoResponse for ShieldError {
             ShieldError::NotFound(msg) => (StatusCode::NOT_FOUND, "NOT_FOUND", msg.clone(), None),
             ShieldError::BadRequest(msg) => {
                 (StatusCode::BAD_REQUEST, "BAD_REQUEST", msg.clone(), None)
+            }
+            ShieldError::Unauthorized(msg) => {
+                (StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg.clone(), None)
+            }
+            ShieldError::Forbidden(msg) => {
+                (StatusCode::FORBIDDEN, "FORBIDDEN", msg.clone(), None)
             }
             ShieldError::Database(e) => {
                 // Log the actual error but don't expose internals

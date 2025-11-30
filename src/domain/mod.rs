@@ -3,10 +3,12 @@
 //! This module contains the core business entities and value objects.
 
 mod action;
+mod company;
 mod evaluation;
 mod hitl;
 
 pub use action::*;
+pub use company::*;
 pub use evaluation::*;
 pub use hitl::*;
 

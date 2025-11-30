@@ -7,7 +7,8 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::domain::{
-    AgentAction, EvaluationResult, HitlTask, HitlTaskSummary,
+    AgentAction, App, AppStatus, Company, CompanyMember, CompanyRole,
+    EvaluationResult, HitlTask, HitlTaskSummary,
 };
 
 /// Database row for agent_actions table.
@@ -158,6 +159,120 @@ impl TryFrom<HitlTaskSummaryRow> for HitlTaskSummary {
             created_at: DateTime::parse_from_rfc3339(&row.created_at)
                 .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?
                 .with_timezone(&Utc),
+        })
+    }
+}
+
+// ==================== Company Models ====================
+
+/// Database row for companies table.
+#[derive(Debug, Clone, FromRow)]
+pub struct CompanyRow {
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl TryFrom<CompanyRow> for Company {
+    type Error = crate::error::ShieldError;
+
+    fn try_from(row: CompanyRow) -> Result<Self, Self::Error> {
+        Ok(Company {
+            id: Uuid::parse_str(&row.id)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
+            name: row.name,
+            slug: row.slug,
+            description: row.description,
+            created_at: DateTime::parse_from_rfc3339(&row.created_at)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.updated_at)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?
+                .with_timezone(&Utc),
+        })
+    }
+}
+
+/// Database row for company_members table.
+#[derive(Debug, Clone, FromRow)]
+pub struct CompanyMemberRow {
+    pub id: String,
+    pub company_id: String,
+    pub user_id: String,
+    pub email: String,
+    pub role: String,
+    pub created_at: String,
+}
+
+impl TryFrom<CompanyMemberRow> for CompanyMember {
+    type Error = crate::error::ShieldError;
+
+    fn try_from(row: CompanyMemberRow) -> Result<Self, Self::Error> {
+        Ok(CompanyMember {
+            id: Uuid::parse_str(&row.id)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
+            company_id: Uuid::parse_str(&row.company_id)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
+            user_id: row.user_id,
+            email: row.email,
+            role: row.role.parse::<CompanyRole>()
+                .map_err(|e| crate::error::ShieldError::Internal(e))?,
+            created_at: DateTime::parse_from_rfc3339(&row.created_at)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?
+                .with_timezone(&Utc),
+        })
+    }
+}
+
+/// Database row for apps table.
+#[derive(Debug, Clone, FromRow)]
+pub struct AppRow {
+    pub id: String,
+    pub company_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub api_key_hash: String,
+    pub api_key_prefix: String,
+    pub status: String,
+    pub rate_limit: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub last_used_at: Option<String>,
+}
+
+impl TryFrom<AppRow> for App {
+    type Error = crate::error::ShieldError;
+
+    fn try_from(row: AppRow) -> Result<Self, Self::Error> {
+        Ok(App {
+            id: Uuid::parse_str(&row.id)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
+            company_id: Uuid::parse_str(&row.company_id)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
+            name: row.name,
+            description: row.description,
+            api_key: None, // Never return the actual key
+            api_key_prefix: row.api_key_prefix,
+            status: row.status.parse::<AppStatus>()
+                .map_err(|e| crate::error::ShieldError::Internal(e))?,
+            rate_limit: row.rate_limit as u32,
+            created_at: DateTime::parse_from_rfc3339(&row.created_at)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.updated_at)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?
+                .with_timezone(&Utc),
+            last_used_at: row
+                .last_used_at
+                .map(|s| {
+                    DateTime::parse_from_rfc3339(&s)
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))
+                })
+                .transpose()?,
         })
     }
 }

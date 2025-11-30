@@ -4,10 +4,14 @@ use sqlx::sqlite::SqlitePool;
 use uuid::Uuid;
 
 use crate::domain::{
-    AgentAction, EvaluationResult, HitlStatus, HitlTask, HitlTaskDetails, HitlTaskSummary,
+    AgentAction, App, AppStatus, Company, CompanyMember, CompanyRole, EvaluationResult, HitlStatus,
+    HitlTask, HitlTaskDetails, HitlTaskSummary,
 };
 use crate::error::{ShieldError, ShieldResult};
-use crate::storage::models::{AgentActionRow, EvaluationRow, HitlTaskRow, HitlTaskSummaryRow};
+use crate::storage::models::{
+    AgentActionRow, AppRow, CompanyMemberRow, CompanyRow, EvaluationRow, HitlTaskRow,
+    HitlTaskSummaryRow,
+};
 
 /// Repository for all Shield database operations.
 #[derive(Clone)]
@@ -89,6 +93,68 @@ impl ShieldRepository {
             );
 
             CREATE INDEX IF NOT EXISTS idx_hitl_tasks_status ON hitl_tasks(status);
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Company tables
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS companies (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL UNIQUE,
+                description TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_companies_slug ON companies(slug);
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS company_members (
+                id TEXT PRIMARY KEY,
+                company_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                email TEXT NOT NULL,
+                role TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
+                UNIQUE(company_id, user_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_company_members_company ON company_members(company_id);
+            CREATE INDEX IF NOT EXISTS idx_company_members_user ON company_members(user_id);
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS apps (
+                id TEXT PRIMARY KEY,
+                company_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                api_key_hash TEXT NOT NULL UNIQUE,
+                api_key_prefix TEXT NOT NULL,
+                status TEXT NOT NULL,
+                rate_limit INTEGER NOT NULL DEFAULT 100,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_used_at TEXT,
+                FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_apps_company ON apps(company_id);
+            CREATE INDEX IF NOT EXISTS idx_apps_api_key_hash ON apps(api_key_hash);
             "#,
         )
         .execute(&self.pool)
@@ -316,6 +382,340 @@ impl ShieldRepository {
         };
 
         rows.into_iter().map(|r| r.try_into()).collect()
+    }
+
+    // ==================== Companies ====================
+
+    /// Create a new company.
+    pub async fn create_company(&self, company: &Company) -> ShieldResult<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO companies (id, name, slug, description, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(company.id.to_string())
+        .bind(&company.name)
+        .bind(&company.slug)
+        .bind(&company.description)
+        .bind(company.created_at.to_rfc3339())
+        .bind(company.updated_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get a company by ID.
+    pub async fn get_company(&self, id: Uuid) -> ShieldResult<Company> {
+        let row: CompanyRow = sqlx::query_as("SELECT * FROM companies WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| ShieldError::NotFound(format!("Company {} not found", id)))?;
+
+        row.try_into()
+    }
+
+    /// Get a company by slug.
+    pub async fn get_company_by_slug(&self, slug: &str) -> ShieldResult<Company> {
+        let row: CompanyRow = sqlx::query_as("SELECT * FROM companies WHERE slug = ?")
+            .bind(slug)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| ShieldError::NotFound(format!("Company '{}' not found", slug)))?;
+
+        row.try_into()
+    }
+
+    /// Update a company.
+    pub async fn update_company(
+        &self,
+        id: Uuid,
+        name: Option<&str>,
+        description: Option<&str>,
+    ) -> ShieldResult<Company> {
+        let updated_at = chrono::Utc::now().to_rfc3339();
+
+        if let Some(name) = name {
+            let slug = Company::slugify(name);
+            sqlx::query("UPDATE companies SET name = ?, slug = ?, updated_at = ? WHERE id = ?")
+                .bind(name)
+                .bind(&slug)
+                .bind(&updated_at)
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?;
+        }
+
+        if let Some(desc) = description {
+            sqlx::query("UPDATE companies SET description = ?, updated_at = ? WHERE id = ?")
+                .bind(desc)
+                .bind(&updated_at)
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?;
+        }
+
+        self.get_company(id).await
+    }
+
+    /// Delete a company.
+    pub async fn delete_company(&self, id: Uuid) -> ShieldResult<()> {
+        let result = sqlx::query("DELETE FROM companies WHERE id = ?")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(ShieldError::NotFound(format!("Company {} not found", id)));
+        }
+
+        Ok(())
+    }
+
+    /// List companies for a user.
+    pub async fn list_user_companies(&self, user_id: &str) -> ShieldResult<Vec<Company>> {
+        let rows: Vec<CompanyRow> = sqlx::query_as(
+            r#"
+            SELECT c.* FROM companies c
+            JOIN company_members m ON c.id = m.company_id
+            WHERE m.user_id = ?
+            ORDER BY c.name ASC
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(|r| r.try_into()).collect()
+    }
+
+    // ==================== Company Members ====================
+
+    /// Add a member to a company.
+    pub async fn add_company_member(&self, member: &CompanyMember) -> ShieldResult<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO company_members (id, company_id, user_id, email, role, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(member.id.to_string())
+        .bind(member.company_id.to_string())
+        .bind(&member.user_id)
+        .bind(&member.email)
+        .bind(member.role.to_string())
+        .bind(member.created_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get company members.
+    pub async fn list_company_members(&self, company_id: Uuid) -> ShieldResult<Vec<CompanyMember>> {
+        let rows: Vec<CompanyMemberRow> = sqlx::query_as(
+            "SELECT * FROM company_members WHERE company_id = ? ORDER BY created_at ASC",
+        )
+        .bind(company_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(|r| r.try_into()).collect()
+    }
+
+    /// Get a user's membership in a company.
+    pub async fn get_company_member(
+        &self,
+        company_id: Uuid,
+        user_id: &str,
+    ) -> ShieldResult<CompanyMember> {
+        let row: CompanyMemberRow =
+            sqlx::query_as("SELECT * FROM company_members WHERE company_id = ? AND user_id = ?")
+                .bind(company_id.to_string())
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or_else(|| ShieldError::NotFound("Member not found".to_string()))?;
+
+        row.try_into()
+    }
+
+    /// Update a member's role.
+    pub async fn update_member_role(
+        &self,
+        company_id: Uuid,
+        user_id: &str,
+        role: CompanyRole,
+    ) -> ShieldResult<()> {
+        let result =
+            sqlx::query("UPDATE company_members SET role = ? WHERE company_id = ? AND user_id = ?")
+                .bind(role.to_string())
+                .bind(company_id.to_string())
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(ShieldError::NotFound("Member not found".to_string()));
+        }
+
+        Ok(())
+    }
+
+    /// Remove a member from a company.
+    pub async fn remove_company_member(&self, company_id: Uuid, user_id: &str) -> ShieldResult<()> {
+        let result =
+            sqlx::query("DELETE FROM company_members WHERE company_id = ? AND user_id = ?")
+                .bind(company_id.to_string())
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(ShieldError::NotFound("Member not found".to_string()));
+        }
+
+        Ok(())
+    }
+
+    // ==================== Apps ====================
+
+    /// Create a new app.
+    pub async fn create_app(&self, app: &App, api_key_hash: &str) -> ShieldResult<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO apps (
+                id, company_id, name, description, api_key_hash, api_key_prefix,
+                status, rate_limit, created_at, updated_at, last_used_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(app.id.to_string())
+        .bind(app.company_id.to_string())
+        .bind(&app.name)
+        .bind(&app.description)
+        .bind(api_key_hash)
+        .bind(&app.api_key_prefix)
+        .bind(app.status.to_string())
+        .bind(app.rate_limit as i64)
+        .bind(app.created_at.to_rfc3339())
+        .bind(app.updated_at.to_rfc3339())
+        .bind(app.last_used_at.map(|dt| dt.to_rfc3339()))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get an app by ID.
+    pub async fn get_app(&self, id: Uuid) -> ShieldResult<App> {
+        let row: AppRow = sqlx::query_as("SELECT * FROM apps WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| ShieldError::NotFound(format!("App {} not found", id)))?;
+
+        row.try_into()
+    }
+
+    /// Get an app by API key hash.
+    pub async fn get_app_by_api_key_hash(&self, api_key_hash: &str) -> ShieldResult<App> {
+        let row: AppRow = sqlx::query_as("SELECT * FROM apps WHERE api_key_hash = ?")
+            .bind(api_key_hash)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| ShieldError::NotFound("Invalid API key".to_string()))?;
+
+        row.try_into()
+    }
+
+    /// List apps for a company.
+    pub async fn list_company_apps(&self, company_id: Uuid) -> ShieldResult<Vec<App>> {
+        let rows: Vec<AppRow> =
+            sqlx::query_as("SELECT * FROM apps WHERE company_id = ? ORDER BY created_at DESC")
+                .bind(company_id.to_string())
+                .fetch_all(&self.pool)
+                .await?;
+
+        rows.into_iter().map(|r| r.try_into()).collect()
+    }
+
+    /// Update an app.
+    pub async fn update_app(
+        &self,
+        id: Uuid,
+        name: Option<&str>,
+        description: Option<&str>,
+        status: Option<AppStatus>,
+        rate_limit: Option<u32>,
+    ) -> ShieldResult<App> {
+        let updated_at = chrono::Utc::now().to_rfc3339();
+
+        if let Some(name) = name {
+            sqlx::query("UPDATE apps SET name = ?, updated_at = ? WHERE id = ?")
+                .bind(name)
+                .bind(&updated_at)
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?;
+        }
+
+        if let Some(desc) = description {
+            sqlx::query("UPDATE apps SET description = ?, updated_at = ? WHERE id = ?")
+                .bind(desc)
+                .bind(&updated_at)
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?;
+        }
+
+        if let Some(status) = status {
+            sqlx::query("UPDATE apps SET status = ?, updated_at = ? WHERE id = ?")
+                .bind(status.to_string())
+                .bind(&updated_at)
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?;
+        }
+
+        if let Some(rate_limit) = rate_limit {
+            sqlx::query("UPDATE apps SET rate_limit = ?, updated_at = ? WHERE id = ?")
+                .bind(rate_limit as i64)
+                .bind(&updated_at)
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?;
+        }
+
+        self.get_app(id).await
+    }
+
+    /// Update app's last used timestamp.
+    pub async fn update_app_last_used(&self, id: Uuid) -> ShieldResult<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query("UPDATE apps SET last_used_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Delete an app.
+    pub async fn delete_app(&self, id: Uuid) -> ShieldResult<()> {
+        let result = sqlx::query("DELETE FROM apps WHERE id = ?")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(ShieldError::NotFound(format!("App {} not found", id)));
+        }
+
+        Ok(())
     }
 }
 

@@ -5,7 +5,8 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::domain::{
-    AgentAction, EvaluationResult, HitlStatus, HitlTaskDetails, HitlTaskSummary,
+    AgentAction, App, AppStatus, Company, CompanyMember, CompanyRole,
+    EvaluationResult, HitlStatus, HitlTaskDetails, HitlTaskSummary,
 };
 
 // ==================== Evaluate Action ====================
@@ -137,5 +138,137 @@ pub struct UserInfo {
     pub email: String,
     /// User role.
     pub role: String,
+}
+
+// ==================== Companies ====================
+
+/// Request to create a company.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateCompanyRequest {
+    /// Company name.
+    pub name: String,
+    /// Optional description.
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// Request to update a company.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateCompanyRequest {
+    /// New company name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// New description.
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// Response for company operations.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CompanyResponse {
+    /// The company.
+    pub company: Company,
+}
+
+/// Response for listing companies.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ListCompaniesResponse {
+    /// List of companies.
+    pub companies: Vec<Company>,
+}
+
+// ==================== Company Members ====================
+
+/// Request to add a member to a company.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AddMemberRequest {
+    /// User ID to add.
+    pub user_id: String,
+    /// User email.
+    pub email: String,
+    /// Role to assign.
+    pub role: CompanyRole,
+}
+
+/// Request to update a member's role.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateMemberRoleRequest {
+    /// New role.
+    pub role: CompanyRole,
+}
+
+/// Response for member operations.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MemberResponse {
+    /// The member.
+    pub member: CompanyMember,
+}
+
+/// Response for listing members.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ListMembersResponse {
+    /// List of members.
+    pub members: Vec<CompanyMember>,
+}
+
+// ==================== Apps ====================
+
+/// Request to create an app.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateAppRequest {
+    /// App name.
+    pub name: String,
+    /// Optional description.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Rate limit (requests per minute).
+    #[serde(default = "default_rate_limit")]
+    pub rate_limit: u32,
+}
+
+fn default_rate_limit() -> u32 {
+    100
+}
+
+/// Request to update an app.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateAppRequest {
+    /// New app name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// New description.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// New status.
+    #[serde(default)]
+    pub status: Option<AppStatus>,
+    /// New rate limit.
+    #[serde(default)]
+    pub rate_limit: Option<u32>,
+}
+
+/// Response for app creation (includes API key).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CreateAppResponse {
+    /// The app.
+    pub app: App,
+    /// The API key (only shown once).
+    pub api_key: String,
+    /// Warning about the API key.
+    pub warning: String,
+}
+
+/// Response for app operations.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AppResponse {
+    /// The app.
+    pub app: App,
+}
+
+/// Response for listing apps.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ListAppsResponse {
+    /// List of apps.
+    pub apps: Vec<App>,
 }
 
