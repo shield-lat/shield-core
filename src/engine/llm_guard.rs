@@ -337,11 +337,19 @@ impl SyncLlamaGuardFirewall {
 
 impl InputFirewall for SyncLlamaGuardFirewall {
     fn evaluate(&self, action: &AgentAction) -> FirewallOutcome {
+        tracing::debug!(
+            trace_id = %action.trace_id,
+            enabled = self.inner.config.enabled,
+            "Llama Guard firewall evaluating action"
+        );
+        
         if !self.inner.config.enabled {
+            tracing::debug!("Llama Guard is disabled, skipping");
             return FirewallOutcome::Clean;
         }
 
         let content = self.inner.build_content(action);
+        tracing::debug!(content_len = content.len(), "Sending to Llama Guard API");
 
         // Use tokio's current runtime to block on the async operation
         let result = tokio::task::block_in_place(|| {
@@ -350,6 +358,11 @@ impl InputFirewall for SyncLlamaGuardFirewall {
 
         match result {
             Ok(guard_result) => {
+                tracing::debug!(
+                    is_safe = guard_result.is_safe,
+                    categories = ?guard_result.violated_categories,
+                    "Llama Guard API response received"
+                );
                 if guard_result.is_safe {
                     FirewallOutcome::Clean
                 } else {

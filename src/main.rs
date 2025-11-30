@@ -64,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
         port = %config.server.port,
         database = %config.database.url,
         auth_enabled = %config.auth.enabled,
+        llm_enabled = %config.llm.enabled,
         "Configuration loaded"
     );
 

@@ -150,11 +150,10 @@ impl Config {
             // Layer on local overrides
             .add_source(File::with_name("config/local").required(false))
             // Layer on environment variables with SHIELD_ prefix
-            // Use double underscore (__) as separator for nested keys
-            // Example: SHIELD_LLM__ENABLED=true sets llm.enabled
+            // Single underscore separator: SHIELD_LLM_ENABLED=true sets llm.enabled
             .add_source(
                 Environment::with_prefix("SHIELD")
-                    .separator("__")
+                    .separator("_")
                     .try_parsing(true),
             )
             .build()?;

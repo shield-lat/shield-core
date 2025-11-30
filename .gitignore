@@ -1,4 +1,5 @@
-/target
-.DS_Store
 *.db
+.DS_Store
 .env
+/target
+config/local.yaml
