@@ -15,10 +15,11 @@ axum = { version = "0.7", features = ["json", "query"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
-# Database
-sqlx = { version = "0.8", features = [
+# Database (default-features=false to avoid postgres/mysql which pull in problematic deps)
+sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio",
     "sqlite",
+    "derive",
     "uuid",
     "chrono",
     "json",
@@ -51,6 +52,11 @@ hex = "0.4"
 # OpenAPI (optional, for documentation)
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "8", features = ["axum"] }
+
+# Pin home to a version that doesn't require edition 2024
+# (pulled in transitively by some sqlx features we don't use)
+[dependencies.home]
+version = "=0.5.9"
 
 [dev-dependencies]
 tokio-test = "0.4"
