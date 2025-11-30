@@ -103,14 +103,14 @@ pub async fn require_jwt(
 
 /// Middleware that requires reviewer role or higher.
 #[allow(dead_code)]
-pub async fn require_reviewer(
-    request: Request<Body>,
-    next: Next,
-) -> Result<Response, AuthError> {
-    let claims = request.extensions().get::<Claims>().ok_or_else(|| AuthError {
-        error: "Authentication required".to_string(),
-        code: "UNAUTHENTICATED".to_string(),
-    })?;
+pub async fn require_reviewer(request: Request<Body>, next: Next) -> Result<Response, AuthError> {
+    let claims = request
+        .extensions()
+        .get::<Claims>()
+        .ok_or_else(|| AuthError {
+            error: "Authentication required".to_string(),
+            code: "UNAUTHENTICATED".to_string(),
+        })?;
 
     if !claims.role.can_review() {
         return Err(AuthError {
@@ -138,4 +138,3 @@ impl<B> AuthExtensions for Request<B> {
         self.extensions().get()
     }
 }
-

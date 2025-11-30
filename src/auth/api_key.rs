@@ -153,4 +153,3 @@ mod tests {
         assert!(validator.validate("sk-test-key").await.is_none());
     }
 }
-
