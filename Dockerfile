@@ -48,8 +48,8 @@ COPY config ./config
 RUN mkdir -p /app/data
 
 # Set environment variables
-ENV SHIELD_SERVER__HOST=0.0.0.0
-ENV SHIELD_DATABASE__URL=sqlite:/app/data/shield.db?mode=rwc
+ENV SHIELD_SERVER_HOST=0.0.0.0
+ENV SHIELD_DATABASE_URL=sqlite:/app/data/shield.db?mode=rwc
 ENV RUST_LOG=shield_core=info,tower_http=info
 
 # Railway provides PORT env var - we'll read it in the app
