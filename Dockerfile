@@ -56,6 +56,6 @@ ENV RUST_LOG=shield_core=info,tower_http=info
 # Default to 8080 if not set
 ENV PORT=8080
 
-# Run the application with shell to expand $PORT
-CMD ["sh", "-c", "SHIELD_SERVER__PORT=$PORT ./shield-core"]
+# Run the application
+CMD ["./shield-core"]
 
