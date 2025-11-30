@@ -221,7 +221,7 @@ impl App {
 
         let random_bytes: [u8; 32] = rand_bytes();
         let mut hasher = Sha256::new();
-        hasher.update(&random_bytes);
+        hasher.update(random_bytes);
         hasher.update(Utc::now().timestamp_nanos_opt().unwrap_or(0).to_le_bytes());
         let hash = hasher.finalize();
 

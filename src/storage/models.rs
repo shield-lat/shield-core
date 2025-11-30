@@ -7,8 +7,8 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::domain::{
-    AgentAction, App, AppStatus, Company, CompanyMember, CompanyRole,
-    EvaluationResult, HitlTask, HitlTaskSummary,
+    AgentAction, App, AppStatus, Company, CompanyMember, CompanyRole, EvaluationResult, HitlTask,
+    HitlTaskSummary,
 };
 
 /// Database row for agent_actions table.
@@ -218,8 +218,10 @@ impl TryFrom<CompanyMemberRow> for CompanyMember {
                 .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
             user_id: row.user_id,
             email: row.email,
-            role: row.role.parse::<CompanyRole>()
-                .map_err(|e| crate::error::ShieldError::Internal(e))?,
+            role: row
+                .role
+                .parse::<CompanyRole>()
+                .map_err(crate::error::ShieldError::Internal)?,
             created_at: DateTime::parse_from_rfc3339(&row.created_at)
                 .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?
                 .with_timezone(&Utc),
@@ -256,8 +258,10 @@ impl TryFrom<AppRow> for App {
             description: row.description,
             api_key: None, // Never return the actual key
             api_key_prefix: row.api_key_prefix,
-            status: row.status.parse::<AppStatus>()
-                .map_err(|e| crate::error::ShieldError::Internal(e))?,
+            status: row
+                .status
+                .parse::<AppStatus>()
+                .map_err(crate::error::ShieldError::Internal)?,
             rate_limit: row.rate_limit as u32,
             created_at: DateTime::parse_from_rfc3339(&row.created_at)
                 .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?
@@ -276,4 +280,3 @@ impl TryFrom<AppRow> for App {
         })
     }
 }
-
