@@ -19,6 +19,16 @@ pub enum ActionType {
     PayBill,
     /// View transaction history.
     GetTransactions,
+    /// Request a loan.
+    RequestLoan,
+    /// Add a new beneficiary.
+    AddBeneficiary,
+    /// Update user profile.
+    UpdateProfile,
+    /// Close an account.
+    CloseAccount,
+    /// Refund a transaction.
+    RefundTransaction,
     /// Unknown or unclassified action.
     Unknown,
 }
@@ -30,6 +40,11 @@ impl std::fmt::Display for ActionType {
             ActionType::TransferFunds => write!(f, "transfer_funds"),
             ActionType::PayBill => write!(f, "pay_bill"),
             ActionType::GetTransactions => write!(f, "get_transactions"),
+            ActionType::RequestLoan => write!(f, "request_loan"),
+            ActionType::AddBeneficiary => write!(f, "add_beneficiary"),
+            ActionType::UpdateProfile => write!(f, "update_profile"),
+            ActionType::CloseAccount => write!(f, "close_account"),
+            ActionType::RefundTransaction => write!(f, "refund_transaction"),
             ActionType::Unknown => write!(f, "unknown"),
         }
     }
@@ -75,6 +90,10 @@ pub struct AgentAction {
     /// Trace ID for distributed tracing (provided by caller or generated).
     #[serde(default = "default_trace_id")]
     pub trace_id: String,
+
+    /// ID of the app/agent that initiated this action.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<Uuid>,
 
     /// ID of the user on whose behalf the action is being performed.
     pub user_id: String,
@@ -124,6 +143,7 @@ impl AgentAction {
         Self {
             id: Uuid::new_v4(),
             trace_id: Uuid::new_v4().to_string(),
+            app_id: None,
             user_id: user_id.into(),
             channel: channel.into(),
             model_name: model_name.into(),
@@ -136,12 +156,19 @@ impl AgentAction {
         }
     }
 
+    /// Set the app ID for this action.
+    pub fn with_app_id(mut self, app_id: Uuid) -> Self {
+        self.app_id = Some(app_id);
+        self
+    }
+
     /// Try to extract the amount from the payload (for monetary actions).
     pub fn extract_amount(&self) -> Option<f64> {
         match self.action_type {
-            ActionType::TransferFunds | ActionType::PayBill => {
-                self.payload.get("amount").and_then(|v| v.as_f64())
-            }
+            ActionType::TransferFunds
+            | ActionType::PayBill
+            | ActionType::RequestLoan
+            | ActionType::RefundTransaction => self.payload.get("amount").and_then(|v| v.as_f64()),
             _ => None,
         }
     }

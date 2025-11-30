@@ -7,8 +7,9 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::domain::{
-    AgentAction, App, AppStatus, Company, CompanyMember, CompanyRole, EvaluationResult, HitlTask,
-    HitlTaskSummary,
+    AgentAction, App, AppStatus, AttackEvent, AttackOutcome, AttackType, Company, CompanyMember,
+    CompanyRole, CompanySettings, EvaluationResult, HitlTask, HitlTaskSummary, PolicyThresholds,
+    RiskTier,
 };
 
 /// Database row for agent_actions table.
@@ -16,6 +17,7 @@ use crate::domain::{
 pub struct AgentActionRow {
     pub id: String,
     pub trace_id: String,
+    pub app_id: Option<String>,
     pub user_id: String,
     pub channel: String,
     pub model_name: String,
@@ -35,6 +37,11 @@ impl TryFrom<AgentActionRow> for AgentAction {
             id: Uuid::parse_str(&row.id)
                 .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
             trace_id: row.trace_id,
+            app_id: row
+                .app_id
+                .map(|s| Uuid::parse_str(&s))
+                .transpose()
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
             user_id: row.user_id,
             channel: row.channel,
             model_name: row.model_name,
@@ -279,4 +286,124 @@ impl TryFrom<AppRow> for App {
                 .transpose()?,
         })
     }
+}
+
+// ==================== Attack Events ====================
+
+/// Database row for attack_events table.
+#[derive(Debug, Clone, FromRow)]
+pub struct AttackEventRow {
+    pub id: String,
+    pub company_id: String,
+    pub app_id: Option<String>,
+    pub agent_action_id: String,
+    pub attack_type: String,
+    pub severity: String,
+    pub blocked: i32,
+    pub outcome: String,
+    pub user_id: String,
+    pub description: String,
+    pub details: Option<String>,
+    pub created_at: String,
+}
+
+impl TryFrom<AttackEventRow> for AttackEvent {
+    type Error = crate::error::ShieldError;
+
+    fn try_from(row: AttackEventRow) -> Result<Self, Self::Error> {
+        Ok(AttackEvent {
+            id: Uuid::parse_str(&row.id)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
+            company_id: Uuid::parse_str(&row.company_id)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
+            app_id: row
+                .app_id
+                .map(|s| Uuid::parse_str(&s))
+                .transpose()
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
+            app_name: None,
+            agent_action_id: Uuid::parse_str(&row.agent_action_id)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
+            attack_type: row
+                .attack_type
+                .parse::<AttackType>()
+                .map_err(crate::error::ShieldError::Internal)?,
+            severity: row
+                .severity
+                .parse::<RiskTier>()
+                .map_err(crate::error::ShieldError::Internal)?,
+            blocked: row.blocked != 0,
+            outcome: row
+                .outcome
+                .parse::<AttackOutcome>()
+                .map_err(crate::error::ShieldError::Internal)?,
+            user_id: row.user_id,
+            description: row.description,
+            details: row.details,
+            created_at: DateTime::parse_from_rfc3339(&row.created_at)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?
+                .with_timezone(&Utc),
+        })
+    }
+}
+
+// ==================== Company Settings ====================
+
+/// Database row for company_settings table.
+#[derive(Debug, Clone, FromRow)]
+pub struct CompanySettingsRow {
+    pub company_id: String,
+    pub logo: Option<String>,
+    pub webhook_url: Option<String>,
+    pub notification_email: Option<String>,
+    pub max_auto_approve_amount: f64,
+    pub hitl_threshold_amount: f64,
+    pub velocity_limit_per_hour: i32,
+    pub velocity_limit_per_day: i32,
+    pub block_high_risk_actions: i32,
+    pub require_hitl_for_new_beneficiaries: i32,
+}
+
+impl CompanySettingsRow {
+    /// Convert to CompanySettings with company info.
+    pub fn into_settings(
+        self,
+        company_id: Uuid,
+        company_name: String,
+    ) -> Result<CompanySettings, crate::error::ShieldError> {
+        Ok(CompanySettings {
+            id: company_id,
+            name: company_name,
+            logo: self.logo,
+            webhook_url: self.webhook_url,
+            notification_email: self.notification_email,
+            policy_thresholds: PolicyThresholds {
+                max_auto_approve_amount: self.max_auto_approve_amount,
+                hitl_threshold_amount: self.hitl_threshold_amount,
+                velocity_limit_per_hour: self.velocity_limit_per_hour,
+                velocity_limit_per_day: self.velocity_limit_per_day,
+                block_high_risk_actions: self.block_high_risk_actions != 0,
+                require_hitl_for_new_beneficiaries: self.require_hitl_for_new_beneficiaries != 0,
+            },
+        })
+    }
+}
+
+// ==================== Action List View ====================
+
+/// Row for action list query with evaluation data.
+#[derive(Debug, Clone, FromRow)]
+pub struct ActionListRow {
+    pub id: String,
+    pub trace_id: String,
+    pub app_id: Option<String>,
+    pub user_id: String,
+    pub action_type: String,
+    pub original_intent: String,
+    pub amount: Option<f64>,
+    pub currency: Option<String>,
+    pub decision: String,
+    pub risk_tier: String,
+    pub reasons: String,
+    pub created_at: String,
 }

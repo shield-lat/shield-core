@@ -32,6 +32,20 @@ impl std::fmt::Display for RiskTier {
     }
 }
 
+impl std::str::FromStr for RiskTier {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "low" => Ok(RiskTier::Low),
+            "medium" => Ok(RiskTier::Medium),
+            "high" => Ok(RiskTier::High),
+            "critical" => Ok(RiskTier::Critical),
+            _ => Err(format!("Unknown risk tier: {}", s)),
+        }
+    }
+}
+
 /// Decision status for an action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]

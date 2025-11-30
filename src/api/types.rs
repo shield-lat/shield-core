@@ -272,3 +272,166 @@ pub struct ListAppsResponse {
     pub apps: Vec<App>,
 }
 
+// ==================== Metrics ====================
+
+use crate::domain::{
+    AttackEvent, CompanySettings, MetricsOverview, PolicyThresholds, RiskDistribution,
+    TimeSeriesData,
+};
+
+/// Query parameters for metrics.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MetricsQuery {
+    /// Time range: 24h, 7d, 30d, or 90d.
+    #[serde(default = "default_time_range")]
+    pub time_range: String,
+    /// Optional app filter.
+    #[serde(default)]
+    pub app_id: Option<Uuid>,
+}
+
+fn default_time_range() -> String {
+    "7d".to_string()
+}
+
+/// Response for metrics overview.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MetricsOverviewResponse {
+    #[serde(flatten)]
+    pub metrics: MetricsOverview,
+}
+
+/// Response for time series data.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TimeSeriesResponse {
+    #[serde(flatten)]
+    pub data: TimeSeriesData,
+}
+
+/// Response for risk distribution.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RiskDistributionResponse {
+    #[serde(flatten)]
+    pub data: RiskDistribution,
+}
+
+// ==================== Actions List ====================
+
+/// Query parameters for listing actions.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ListActionsQuery {
+    /// Filter by app.
+    #[serde(default)]
+    pub app_id: Option<Uuid>,
+    /// Filter by decision.
+    #[serde(default)]
+    pub decision: Option<String>,
+    /// Filter by risk tier.
+    #[serde(default)]
+    pub risk_tier: Option<String>,
+    /// Filter by user ID.
+    #[serde(default)]
+    pub user_id: Option<String>,
+    /// Search string.
+    #[serde(default)]
+    pub search: Option<String>,
+    /// Time range filter.
+    #[serde(default)]
+    pub time_range: Option<String>,
+    /// Maximum results.
+    #[serde(default = "default_limit")]
+    pub limit: i64,
+    /// Pagination offset.
+    #[serde(default)]
+    pub offset: i64,
+}
+
+/// Action item in list response.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ActionListItem {
+    pub id: Uuid,
+    pub trace_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_name: Option<String>,
+    pub user_id: String,
+    pub action_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    pub original_intent: String,
+    pub decision: String,
+    pub risk_tier: String,
+    pub reasons: Vec<String>,
+    pub created_at: String,
+}
+
+/// Response for listing actions.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ListActionsResponse {
+    pub actions: Vec<ActionListItem>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+// ==================== Attacks ====================
+
+/// Query parameters for listing attacks.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ListAttacksQuery {
+    /// Filter by app.
+    #[serde(default)]
+    pub app_id: Option<Uuid>,
+    /// Filter by attack type.
+    #[serde(default)]
+    pub attack_type: Option<String>,
+    /// Filter by severity.
+    #[serde(default)]
+    pub severity: Option<String>,
+    /// Filter by outcome.
+    #[serde(default)]
+    pub outcome: Option<String>,
+    /// Maximum results.
+    #[serde(default = "default_limit")]
+    pub limit: i64,
+    /// Pagination offset.
+    #[serde(default)]
+    pub offset: i64,
+}
+
+/// Response for listing attacks.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ListAttacksResponse {
+    pub attacks: Vec<AttackEvent>,
+    pub total: i64,
+}
+
+// ==================== Settings ====================
+
+/// Response for company settings.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SettingsResponse {
+    #[serde(flatten)]
+    pub settings: CompanySettings,
+}
+
+/// Request to update settings.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateSettingsRequest {
+    /// New logo URL.
+    #[serde(default)]
+    pub logo: Option<String>,
+    /// New webhook URL.
+    #[serde(default)]
+    pub webhook_url: Option<String>,
+    /// New notification email.
+    #[serde(default)]
+    pub notification_email: Option<String>,
+    /// New policy thresholds.
+    #[serde(default)]
+    pub policy_thresholds: Option<PolicyThresholds>,
+}
+

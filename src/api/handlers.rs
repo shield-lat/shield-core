@@ -1044,3 +1044,411 @@ pub async fn delete_app(
 
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
+
+// ==================== Metrics Endpoints ====================
+
+use crate::domain::{
+    AttackOutcome, AttackType, DecisionStatus, Granularity, RiskTier, TimeRange,
+};
+
+/// Get metrics overview for a company.
+///
+/// GET /v1/companies/{id}/metrics/overview
+#[utoipa::path(
+    get,
+    path = "/v1/companies/{id}/metrics/overview",
+    params(
+        ("id" = Uuid, Path, description = "Company ID"),
+        ("time_range" = Option<String>, Query, description = "Time range: 24h, 7d, 30d, 90d"),
+        ("app_id" = Option<Uuid>, Query, description = "Filter by app")
+    ),
+    responses(
+        (status = 200, description = "Metrics overview", body = MetricsOverviewResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not a member"),
+        (status = 404, description = "Company not found")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "metrics"
+)]
+pub async fn get_metrics_overview(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<MetricsQuery>,
+) -> ShieldResult<Json<MetricsOverviewResponse>> {
+    // Verify user is a member
+    let _ = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    let time_range = query
+        .time_range
+        .parse::<TimeRange>()
+        .unwrap_or(TimeRange::Last7d);
+
+    let metrics = state
+        .repository
+        .get_metrics_overview(id, time_range, query.app_id)
+        .await?;
+
+    Ok(Json(MetricsOverviewResponse { metrics }))
+}
+
+/// Get time series data for a company.
+///
+/// GET /v1/companies/{id}/metrics/time-series
+#[utoipa::path(
+    get,
+    path = "/v1/companies/{id}/metrics/time-series",
+    params(
+        ("id" = Uuid, Path, description = "Company ID"),
+        ("time_range" = Option<String>, Query, description = "Time range: 24h, 7d, 30d, 90d"),
+        ("app_id" = Option<Uuid>, Query, description = "Filter by app"),
+        ("granularity" = Option<String>, Query, description = "Granularity: hour, day")
+    ),
+    responses(
+        (status = 200, description = "Time series data", body = TimeSeriesResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not a member")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "metrics"
+)]
+pub async fn get_time_series(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<MetricsQuery>,
+) -> ShieldResult<Json<TimeSeriesResponse>> {
+    let _ = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    let time_range = query
+        .time_range
+        .parse::<TimeRange>()
+        .unwrap_or(TimeRange::Last7d);
+
+    let data = state
+        .repository
+        .get_time_series(id, time_range, Granularity::Day, query.app_id)
+        .await?;
+
+    Ok(Json(TimeSeriesResponse { data }))
+}
+
+/// Get risk distribution for a company.
+///
+/// GET /v1/companies/{id}/metrics/risk-distribution
+#[utoipa::path(
+    get,
+    path = "/v1/companies/{id}/metrics/risk-distribution",
+    params(
+        ("id" = Uuid, Path, description = "Company ID"),
+        ("time_range" = Option<String>, Query, description = "Time range: 24h, 7d, 30d, 90d"),
+        ("app_id" = Option<Uuid>, Query, description = "Filter by app")
+    ),
+    responses(
+        (status = 200, description = "Risk distribution", body = RiskDistributionResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not a member")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "metrics"
+)]
+pub async fn get_risk_distribution(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<MetricsQuery>,
+) -> ShieldResult<Json<RiskDistributionResponse>> {
+    let _ = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    let time_range = query
+        .time_range
+        .parse::<TimeRange>()
+        .unwrap_or(TimeRange::Last7d);
+
+    let data = state
+        .repository
+        .get_risk_distribution(id, time_range, query.app_id)
+        .await?;
+
+    Ok(Json(RiskDistributionResponse { data }))
+}
+
+// ==================== Actions List Endpoints ====================
+
+/// List actions for a company.
+///
+/// GET /v1/companies/{id}/actions
+#[utoipa::path(
+    get,
+    path = "/v1/companies/{id}/actions",
+    params(
+        ("id" = Uuid, Path, description = "Company ID"),
+        ("app_id" = Option<Uuid>, Query, description = "Filter by app"),
+        ("decision" = Option<String>, Query, description = "Filter: allow, require_hitl, block"),
+        ("risk_tier" = Option<String>, Query, description = "Filter: low, medium, high, critical"),
+        ("user_id" = Option<String>, Query, description = "Filter by user ID"),
+        ("search" = Option<String>, Query, description = "Search string"),
+        ("time_range" = Option<String>, Query, description = "Time range: 24h, 7d, 30d, 90d"),
+        ("limit" = Option<i64>, Query, description = "Max results (default 20)"),
+        ("offset" = Option<i64>, Query, description = "Pagination offset")
+    ),
+    responses(
+        (status = 200, description = "List of actions", body = ListActionsResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not a member")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "actions"
+)]
+pub async fn list_company_actions(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<ListActionsQuery>,
+) -> ShieldResult<Json<ListActionsResponse>> {
+    let _ = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    let decision = query
+        .decision
+        .as_ref()
+        .map(|d| {
+            match d.to_lowercase().as_str() {
+                "allow" => Ok(DecisionStatus::Allow),
+                "require_hitl" => Ok(DecisionStatus::RequireHitl),
+                "block" => Ok(DecisionStatus::Block),
+                _ => Err(ShieldError::BadRequest(format!("Invalid decision: {}", d))),
+            }
+        })
+        .transpose()?;
+
+    let risk_tier = query
+        .risk_tier
+        .as_ref()
+        .map(|r| r.parse::<RiskTier>())
+        .transpose()
+        .map_err(|e| ShieldError::BadRequest(e))?;
+
+    let time_range = query
+        .time_range
+        .as_ref()
+        .map(|tr| tr.parse::<TimeRange>())
+        .transpose()
+        .map_err(|e| ShieldError::BadRequest(e))?;
+
+    let limit = query.limit.clamp(1, 100);
+    let offset = query.offset.max(0);
+
+    let (rows, total) = state
+        .repository
+        .list_company_actions(
+            id,
+            query.app_id,
+            decision,
+            risk_tier,
+            query.user_id.as_deref(),
+            query.search.as_deref(),
+            time_range,
+            limit,
+            offset,
+        )
+        .await?;
+
+    let actions = rows
+        .into_iter()
+        .map(|r| ActionListItem {
+            id: Uuid::parse_str(&r.id).unwrap_or_default(),
+            trace_id: r.trace_id,
+            app_id: r.app_id.and_then(|s| Uuid::parse_str(&s).ok()),
+            app_name: None, // Could join with apps table
+            user_id: r.user_id,
+            action_type: r.action_type,
+            amount: r.amount,
+            currency: r.currency,
+            original_intent: r.original_intent,
+            decision: r.decision,
+            risk_tier: r.risk_tier,
+            reasons: serde_json::from_str(&r.reasons).unwrap_or_default(),
+            created_at: r.created_at,
+        })
+        .collect();
+
+    Ok(Json(ListActionsResponse {
+        actions,
+        total,
+        limit,
+        offset,
+    }))
+}
+
+// ==================== Attacks Endpoints ====================
+
+/// List attack events for a company.
+///
+/// GET /v1/companies/{id}/attacks
+#[utoipa::path(
+    get,
+    path = "/v1/companies/{id}/attacks",
+    params(
+        ("id" = Uuid, Path, description = "Company ID"),
+        ("app_id" = Option<Uuid>, Query, description = "Filter by app"),
+        ("attack_type" = Option<String>, Query, description = "Filter by attack type"),
+        ("severity" = Option<String>, Query, description = "Filter by severity"),
+        ("outcome" = Option<String>, Query, description = "Filter: blocked, escalated, allowed"),
+        ("limit" = Option<i64>, Query, description = "Max results"),
+        ("offset" = Option<i64>, Query, description = "Pagination offset")
+    ),
+    responses(
+        (status = 200, description = "List of attacks", body = ListAttacksResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not a member")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "attacks"
+)]
+pub async fn list_attacks(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<ListAttacksQuery>,
+) -> ShieldResult<Json<ListAttacksResponse>> {
+    let _ = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    let attack_type = query
+        .attack_type
+        .as_ref()
+        .map(|t| t.parse::<AttackType>())
+        .transpose()
+        .map_err(|e| ShieldError::BadRequest(e))?;
+
+    let severity = query
+        .severity
+        .as_ref()
+        .map(|s| s.parse::<RiskTier>())
+        .transpose()
+        .map_err(|e| ShieldError::BadRequest(e))?;
+
+    let outcome = query
+        .outcome
+        .as_ref()
+        .map(|o| o.parse::<AttackOutcome>())
+        .transpose()
+        .map_err(|e| ShieldError::BadRequest(e))?;
+
+    let limit = query.limit.clamp(1, 100);
+    let offset = query.offset.max(0);
+
+    let (attacks, total) = state
+        .repository
+        .list_attack_events(id, query.app_id, attack_type, severity, outcome, limit, offset)
+        .await?;
+
+    Ok(Json(ListAttacksResponse { attacks, total }))
+}
+
+// ==================== Settings Endpoints ====================
+
+/// Get company settings.
+///
+/// GET /v1/companies/{id}/settings
+#[utoipa::path(
+    get,
+    path = "/v1/companies/{id}/settings",
+    params(("id" = Uuid, Path, description = "Company ID")),
+    responses(
+        (status = 200, description = "Company settings", body = SettingsResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not a member")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "settings"
+)]
+pub async fn get_company_settings(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+) -> ShieldResult<Json<SettingsResponse>> {
+    let _ = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    let settings = state.repository.get_company_settings(id).await?;
+
+    Ok(Json(SettingsResponse { settings }))
+}
+
+/// Update company settings.
+///
+/// PUT /v1/companies/{id}/settings
+#[utoipa::path(
+    put,
+    path = "/v1/companies/{id}/settings",
+    params(("id" = Uuid, Path, description = "Company ID")),
+    request_body = UpdateSettingsRequest,
+    responses(
+        (status = 200, description = "Settings updated", body = SettingsResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "settings"
+)]
+pub async fn update_company_settings(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    Path(id): Path<Uuid>,
+    Json(request): Json<UpdateSettingsRequest>,
+) -> ShieldResult<Json<SettingsResponse>> {
+    let member = state
+        .repository
+        .get_company_member(id, &claims.sub)
+        .await
+        .map_err(|_| ShieldError::Forbidden("Not a member of this company".to_string()))?;
+
+    if !matches!(member.role, CompanyRole::Owner | CompanyRole::Admin) {
+        return Err(ShieldError::Forbidden(
+            "Only owners and admins can update settings".to_string(),
+        ));
+    }
+
+    let settings = state
+        .repository
+        .update_company_settings(
+            id,
+            request.logo.as_deref(),
+            request.webhook_url.as_deref(),
+            request.notification_email.as_deref(),
+            request.policy_thresholds.as_ref(),
+        )
+        .await?;
+
+    tracing::info!(
+        company_id = %id,
+        updated_by = %claims.sub,
+        "Company settings updated"
+    );
+
+    Ok(Json(SettingsResponse { settings }))
+}

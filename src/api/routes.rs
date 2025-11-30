@@ -67,6 +67,17 @@ impl Modify for SecurityAddon {
         handlers::get_app,
         handlers::update_app,
         handlers::delete_app,
+        // Metrics endpoints
+        handlers::get_metrics_overview,
+        handlers::get_time_series,
+        handlers::get_risk_distribution,
+        // Actions list
+        handlers::list_company_actions,
+        // Attacks
+        handlers::list_attacks,
+        // Settings
+        handlers::get_company_settings,
+        handlers::update_company_settings,
     ),
     components(schemas(
         crate::api::types::EvaluateActionRequest,
@@ -94,6 +105,21 @@ impl Modify for SecurityAddon {
         crate::api::types::CreateAppResponse,
         crate::api::types::AppResponse,
         crate::api::types::ListAppsResponse,
+        // Metrics types
+        crate::api::types::MetricsQuery,
+        crate::api::types::MetricsOverviewResponse,
+        crate::api::types::TimeSeriesResponse,
+        crate::api::types::RiskDistributionResponse,
+        // Actions list types
+        crate::api::types::ListActionsQuery,
+        crate::api::types::ActionListItem,
+        crate::api::types::ListActionsResponse,
+        // Attacks types
+        crate::api::types::ListAttacksQuery,
+        crate::api::types::ListAttacksResponse,
+        // Settings types
+        crate::api::types::SettingsResponse,
+        crate::api::types::UpdateSettingsRequest,
         // Domain types
         crate::domain::AgentAction,
         crate::domain::ActionType,
@@ -112,11 +138,25 @@ impl Modify for SecurityAddon {
         crate::domain::CompanyRole,
         crate::domain::App,
         crate::domain::AppStatus,
+        crate::domain::AttackEvent,
+        crate::domain::AttackType,
+        crate::domain::AttackOutcome,
+        crate::domain::MetricsOverview,
+        crate::domain::Trends,
+        crate::domain::TimeSeriesData,
+        crate::domain::TimeSeriesPoint,
+        crate::domain::RiskDistribution,
+        crate::domain::RiskDistributionPoint,
+        crate::domain::CompanySettings,
+        crate::domain::PolicyThresholds,
     )),
     modifiers(&SecurityAddon),
     tags(
-        (name = "actions", description = "Action evaluation endpoints"),
+        (name = "actions", description = "Action evaluation and listing"),
         (name = "hitl", description = "Human-in-the-loop task management"),
+        (name = "metrics", description = "Analytics and metrics"),
+        (name = "attacks", description = "Security attack events"),
+        (name = "settings", description = "Company settings and policies"),
         (name = "auth", description = "Authentication endpoints"),
         (name = "companies", description = "Company management"),
         (name = "apps", description = "App/API key management"),
@@ -209,6 +249,28 @@ fn build_authenticated_router(
                 .put(handlers::update_app)
                 .delete(handlers::delete_app),
         )
+        // Metrics routes
+        .route(
+            "/v1/companies/{id}/metrics/overview",
+            get(handlers::get_metrics_overview),
+        )
+        .route(
+            "/v1/companies/{id}/metrics/time-series",
+            get(handlers::get_time_series),
+        )
+        .route(
+            "/v1/companies/{id}/metrics/risk-distribution",
+            get(handlers::get_risk_distribution),
+        )
+        // Actions list
+        .route("/v1/companies/{id}/actions", get(handlers::list_company_actions))
+        // Attacks
+        .route("/v1/companies/{id}/attacks", get(handlers::list_attacks))
+        // Settings
+        .route(
+            "/v1/companies/{id}/settings",
+            get(handlers::get_company_settings).put(handlers::update_company_settings),
+        )
         .layer(middleware::from_fn_with_state(
             jwt_manager.clone(),
             require_jwt,
@@ -272,6 +334,28 @@ fn build_unauthenticated_router(state: AppState, auth_state: AuthState, cors: Co
             get(handlers::get_app)
                 .put(handlers::update_app)
                 .delete(handlers::delete_app),
+        )
+        // Metrics routes
+        .route(
+            "/v1/companies/{id}/metrics/overview",
+            get(handlers::get_metrics_overview),
+        )
+        .route(
+            "/v1/companies/{id}/metrics/time-series",
+            get(handlers::get_time_series),
+        )
+        .route(
+            "/v1/companies/{id}/metrics/risk-distribution",
+            get(handlers::get_risk_distribution),
+        )
+        // Actions list
+        .route("/v1/companies/{id}/actions", get(handlers::list_company_actions))
+        // Attacks
+        .route("/v1/companies/{id}/attacks", get(handlers::list_attacks))
+        // Settings
+        .route(
+            "/v1/companies/{id}/settings",
+            get(handlers::get_company_settings).put(handlers::update_company_settings),
         )
         // Health
         .route("/v1/health", get(handlers::health_check))
