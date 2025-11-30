@@ -49,17 +49,13 @@ RUN mkdir -p /app/data
 
 # Set environment variables
 ENV SHIELD_SERVER__HOST=0.0.0.0
-ENV SHIELD_SERVER__PORT=8080
 ENV SHIELD_DATABASE__URL=sqlite:/app/data/shield.db?mode=rwc
 ENV RUST_LOG=shield_core=info,tower_http=info
 
-# Expose port
-EXPOSE 8080
+# Railway provides PORT env var - we'll read it in the app
+# Default to 8080 if not set
+ENV PORT=8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/v1/health || exit 1
-
-# Run the application
-CMD ["./shield-core"]
+# Run the application with shell to expand $PORT
+CMD ["sh", "-c", "SHIELD_SERVER__PORT=$PORT ./shield-core"]
 
