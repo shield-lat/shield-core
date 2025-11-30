@@ -30,6 +30,56 @@ pub struct EvaluateActionResponse {
     pub hitl_task_id: Option<Uuid>,
 }
 
+// ==================== Simple Evaluate (API Key identified) ====================
+
+/// Simplified request for evaluating user input.
+/// The app is identified via the API key in the Authorization header.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct SimpleEvaluateRequest {
+    /// The user's input/intent to evaluate.
+    pub input: String,
+    
+    /// Type of action being proposed (optional, defaults to "unknown").
+    #[serde(default)]
+    pub action_type: Option<String>,
+    
+    /// Additional payload data (optional).
+    #[serde(default)]
+    pub payload: Option<serde_json::Value>,
+    
+    /// User identifier (optional, defaults to "anonymous").
+    #[serde(default)]
+    pub user_id: Option<String>,
+    
+    /// Model name that generated this action (optional).
+    #[serde(default)]
+    pub model_name: Option<String>,
+    
+    /// Chain of thought or reasoning (optional).
+    #[serde(default)]
+    pub cot_trace: Option<String>,
+}
+
+/// Response from simple evaluation.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SimpleEvaluateResponse {
+    /// Whether the action is safe to proceed.
+    pub safe: bool,
+    /// The decision: "allow", "require_hitl", or "block".
+    pub decision: String,
+    /// Risk level: "low", "medium", "high", or "critical".
+    pub risk_tier: String,
+    /// Human-readable reasons for the decision.
+    pub reasons: Vec<String>,
+    /// ID of the HITL task if human review is required.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hitl_task_id: Option<Uuid>,
+    /// The full evaluation ID for reference.
+    pub evaluation_id: Uuid,
+    /// The action ID for reference.
+    pub action_id: Uuid,
+}
+
 // ==================== HITL Tasks ====================
 
 /// Query parameters for listing HITL tasks.

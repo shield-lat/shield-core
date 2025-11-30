@@ -50,6 +50,24 @@ impl std::fmt::Display for ActionType {
     }
 }
 
+impl ActionType {
+    /// Parse an action type from a string.
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "get_balance" | "getbalance" => ActionType::GetBalance,
+            "transfer_funds" | "transferfunds" | "transfer" => ActionType::TransferFunds,
+            "pay_bill" | "paybill" => ActionType::PayBill,
+            "get_transactions" | "gettransactions" | "transactions" => ActionType::GetTransactions,
+            "request_loan" | "requestloan" | "loan" => ActionType::RequestLoan,
+            "add_beneficiary" | "addbeneficiary" | "beneficiary" => ActionType::AddBeneficiary,
+            "update_profile" | "updateprofile" | "profile" => ActionType::UpdateProfile,
+            "close_account" | "closeaccount" => ActionType::CloseAccount,
+            "refund_transaction" | "refundtransaction" | "refund" => ActionType::RefundTransaction,
+            _ => ActionType::Unknown,
+        }
+    }
+}
+
 /// Payload for TransferFunds action.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TransferFundsPayload {
@@ -84,7 +102,8 @@ pub struct PayBillPayload {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AgentAction {
     /// Unique identifier for this action.
-    #[serde(default = "Uuid::new_v4")]
+    /// Always server-generated - client-provided values are ignored.
+    #[serde(default = "Uuid::new_v4", skip_deserializing)]
     pub id: Uuid,
 
     /// Trace ID for distributed tracing (provided by caller or generated).

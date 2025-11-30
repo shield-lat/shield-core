@@ -45,6 +45,7 @@ impl Modify for SecurityAddon {
 #[openapi(
     paths(
         handlers::evaluate_action,
+        handlers::simple_evaluate,
         handlers::list_hitl_tasks,
         handlers::get_hitl_task,
         handlers::submit_hitl_decision,
@@ -217,6 +218,11 @@ fn build_authenticated_router(
         ))
         .with_state(state.clone());
 
+    // Simple evaluate endpoint (API key validated in handler to get app info)
+    let simple_evaluate_route = Router::new()
+        .route("/v1/evaluate", post(handlers::simple_evaluate))
+        .with_state(state.clone());
+
     // Routes requiring JWT (for admin console)
     let admin_routes = Router::new()
         // HITL routes
@@ -307,6 +313,7 @@ fn build_authenticated_router(
 
     Router::new()
         .merge(agent_routes)
+        .merge(simple_evaluate_route)
         .merge(admin_routes)
         .merge(token_refresh_routes)
         .merge(public_routes)
@@ -322,6 +329,8 @@ fn build_unauthenticated_router(state: AppState, cors: CorsLayer) -> Router {
     Router::new()
         // Action evaluation
         .route("/v1/actions/evaluate", post(handlers::evaluate_action))
+        // Simple evaluate (API key validated in handler)
+        .route("/v1/evaluate", post(handlers::simple_evaluate))
         // HITL management
         .route("/v1/hitl/tasks", get(handlers::list_hitl_tasks))
         .route("/v1/hitl/tasks/:id", get(handlers::get_hitl_task))

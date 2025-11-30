@@ -2,12 +2,14 @@
 
 use axum::{
     extract::{Path, Query, State},
+    http::HeaderMap,
     Json,
 };
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::api::types::*;
-use crate::domain::HitlStatus;
+use crate::domain::{ActionType, AgentAction, HitlStatus};
 use crate::error::{ShieldError, ShieldResult};
 use crate::AppState;
 
@@ -64,6 +66,128 @@ pub async fn evaluate_action(
     Ok(Json(EvaluateActionResponse {
         evaluation: result.evaluation,
         hitl_task_id,
+    }))
+}
+
+/// Simple evaluation endpoint - identifies app via API key.
+///
+/// POST /v1/evaluate
+#[utoipa::path(
+    post,
+    path = "/v1/evaluate",
+    request_body = SimpleEvaluateRequest,
+    responses(
+        (status = 200, description = "Evaluation complete", body = SimpleEvaluateResponse),
+        (status = 401, description = "Invalid or missing API key"),
+        (status = 500, description = "Internal error")
+    ),
+    security(
+        ("api_key" = [])
+    ),
+    tag = "evaluate"
+)]
+pub async fn simple_evaluate(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<SimpleEvaluateRequest>,
+) -> ShieldResult<Json<SimpleEvaluateResponse>> {
+    // Extract API key from Authorization header
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .ok_or_else(|| ShieldError::Unauthorized("Missing Authorization header".to_string()))?;
+
+    let api_key = auth_header
+        .strip_prefix("Bearer ")
+        .or_else(|| auth_header.strip_prefix("bearer "))
+        .ok_or_else(|| ShieldError::Unauthorized("Invalid Authorization format. Use: Bearer <api_key>".to_string()))?;
+
+    // Hash the API key and look up the app
+    let api_key_hash = {
+        let mut hasher = Sha256::new();
+        hasher.update(api_key.as_bytes());
+        hex::encode(hasher.finalize())
+    };
+
+    let app = state.repository.get_app_by_api_key_hash(&api_key_hash).await
+        .map_err(|_| ShieldError::Unauthorized("Invalid API key".to_string()))?;
+
+    // Check app is active
+    if app.status != crate::domain::AppStatus::Active {
+        return Err(ShieldError::Unauthorized("API key is not active".to_string()));
+    }
+
+    // Update last_used_at for the app
+    let _ = state.repository.update_app_last_used(app.id).await;
+
+    // Parse action type
+    let action_type = request
+        .action_type
+        .as_ref()
+        .map(|s| ActionType::from_str(s))
+        .unwrap_or(ActionType::Unknown);
+
+    // Build the AgentAction
+    let action = AgentAction {
+        id: Uuid::new_v4(),
+        trace_id: Uuid::new_v4().to_string(),
+        app_id: Some(app.id),
+        user_id: request.user_id.unwrap_or_else(|| "anonymous".to_string()),
+        channel: "api".to_string(),
+        model_name: request.model_name.unwrap_or_else(|| "unknown".to_string()),
+        original_intent: request.input.clone(),
+        action_type,
+        payload: request.payload.unwrap_or(serde_json::json!({})),
+        cot_trace: request.cot_trace,
+        metadata: None,
+        created_at: chrono::Utc::now(),
+    };
+
+    tracing::info!(
+        trace_id = %action.trace_id,
+        app_id = %app.id,
+        app_name = %app.name,
+        user_id = %action.user_id,
+        action_type = %action.action_type,
+        "Simple evaluation started"
+    );
+
+    // Run the evaluation pipeline
+    let result = state.coordinator.evaluate(&action);
+
+    // Persist action and evaluation
+    state.repository.save_action(&action).await?;
+    state.repository.save_evaluation(&result.evaluation).await?;
+
+    // Create HITL task if needed
+    let hitl_task_id = if let Some(ref task) = result.hitl_task {
+        state.repository.save_hitl_task(task).await?;
+        Some(task.id)
+    } else {
+        None
+    };
+
+    let decision_str = result.evaluation.decision.to_string().to_lowercase();
+    let risk_str = result.evaluation.risk_tier.to_string().to_lowercase();
+    let is_safe = decision_str == "allow";
+
+    tracing::info!(
+        trace_id = %action.trace_id,
+        app_name = %app.name,
+        decision = %decision_str,
+        risk_tier = %risk_str,
+        safe = is_safe,
+        "Simple evaluation complete"
+    );
+
+    Ok(Json(SimpleEvaluateResponse {
+        safe: is_safe,
+        decision: decision_str,
+        risk_tier: risk_str,
+        reasons: result.evaluation.reasons,
+        hitl_task_id,
+        evaluation_id: result.evaluation.id,
+        action_id: action.id,
     }))
 }
 
