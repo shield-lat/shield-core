@@ -1,6 +1,45 @@
 [package]
 name = "shield-core"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+description = "AI Safety Gateway for fintech - evaluates LLM agent actions before execution"
+authors = ["Shield Team"]
+license = "MIT"
 
 [dependencies]
+# Async runtime
+tokio = { version = "1.41", features = ["full"] }
+
+# Web framework
+axum = { version = "0.7", features = ["json", "query"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "uuid", "chrono", "json"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Configuration
+config = "0.14"
+
+# Logging/Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Utilities
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# OpenAPI (optional, for documentation)
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "8", features = ["axum"] }
+
+[dev-dependencies]
+tokio-test = "0.4"

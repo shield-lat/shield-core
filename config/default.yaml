@@ -1,0 +1,33 @@
+# Shield Core - Default Configuration
+# Override via environment variables prefixed with SHIELD_
+
+server:
+  host: "127.0.0.1"
+  port: 8080
+
+database:
+  url: "sqlite:shield.db?mode=rwc"
+
+safety:
+  # Maximum amount (in any currency) that can be auto-approved
+  max_auto_amount: 100.0
+  # Amount threshold requiring human-in-the-loop review
+  hitl_threshold: 1000.0
+  # Maximum transfers allowed per hour per user (rate limiting)
+  max_transfers_per_hour: 3
+  # Suspicious keywords for input firewall
+  suspicious_keywords:
+    - "ignore previous instructions"
+    - "bypass"
+    - "transfer all funds"
+    - "override security"
+    - "disregard rules"
+    - "pretend you are"
+    - "act as if"
+    - "forget your instructions"
+
+# Future: LLM integration settings (not implemented in MVP)
+# llm:
+#   alignment_checker_endpoint: ""
+#   api_key: ""
+
