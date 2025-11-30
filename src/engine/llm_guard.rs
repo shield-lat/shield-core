@@ -342,7 +342,7 @@ impl InputFirewall for SyncLlamaGuardFirewall {
             enabled = self.inner.config.enabled,
             "Llama Guard firewall evaluating action"
         );
-        
+
         if !self.inner.config.enabled {
             tracing::debug!("Llama Guard is disabled, skipping");
             return FirewallOutcome::Clean;
