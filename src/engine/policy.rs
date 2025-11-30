@@ -189,6 +189,47 @@ impl ConfigPolicyEngine {
                     }
                 }
             }
+            // High-risk action types always require HITL
+            ActionType::AddBeneficiary => {
+                rules.push(TriggeredRule {
+                    rule_id: "ACTION_ADD_BENEFICIARY".to_string(),
+                    description: "Adding new beneficiary requires human approval".to_string(),
+                    suggests_block: false,
+                    requires_hitl: true,
+                });
+            }
+            ActionType::CloseAccount => {
+                rules.push(TriggeredRule {
+                    rule_id: "ACTION_CLOSE_ACCOUNT".to_string(),
+                    description: "Account closure is a critical action requiring review".to_string(),
+                    suggests_block: false,
+                    requires_hitl: true,
+                });
+            }
+            ActionType::UpdateProfile => {
+                rules.push(TriggeredRule {
+                    rule_id: "ACTION_UPDATE_PROFILE".to_string(),
+                    description: "Profile updates should be reviewed".to_string(),
+                    suggests_block: false,
+                    requires_hitl: true,
+                });
+            }
+            ActionType::RequestLoan => {
+                rules.push(TriggeredRule {
+                    rule_id: "ACTION_REQUEST_LOAN".to_string(),
+                    description: "Loan requests require human verification".to_string(),
+                    suggests_block: false,
+                    requires_hitl: true,
+                });
+            }
+            ActionType::RefundTransaction => {
+                rules.push(TriggeredRule {
+                    rule_id: "ACTION_REFUND".to_string(),
+                    description: "Refunds require human approval".to_string(),
+                    suggests_block: false,
+                    requires_hitl: true,
+                });
+            }
             ActionType::Unknown => {
                 rules.push(TriggeredRule {
                     rule_id: "ACTION_TYPE_UNKNOWN".to_string(),
@@ -197,7 +238,10 @@ impl ConfigPolicyEngine {
                     requires_hitl: true,
                 });
             }
-            _ => {}
+            // Read-only actions are generally safe
+            ActionType::GetBalance | ActionType::GetTransactions => {}
+            // Payment actions are handled by amount rules
+            ActionType::PayBill => {}
         }
 
         rules

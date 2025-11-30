@@ -104,12 +104,28 @@ impl HeuristicAlignmentChecker {
     ) -> Option<String> {
         // Read-only intent but write action
         let is_read_intent = matches!(inferred, ActionType::GetBalance | ActionType::GetTransactions);
-        let is_write_action = matches!(actual, ActionType::TransferFunds | ActionType::PayBill);
+        let is_write_action = matches!(
+            actual,
+            ActionType::TransferFunds | ActionType::PayBill | ActionType::CloseAccount
+        );
 
         if is_read_intent && is_write_action {
             return Some(format!(
                 "User intent '{}' suggests read-only operation, but action is '{}'",
                 intent, actual
+            ));
+        }
+
+        // Critical actions require explicit matching intent
+        let is_critical_action = matches!(
+            actual,
+            ActionType::CloseAccount | ActionType::AddBeneficiary | ActionType::RequestLoan
+        );
+
+        if is_critical_action && inferred != actual {
+            return Some(format!(
+                "Critical action '{}' does not match user intent '{}'",
+                actual, intent
             ));
         }
 

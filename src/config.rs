@@ -15,6 +15,8 @@ pub struct Config {
     pub safety: SafetyConfig,
     #[serde(default)]
     pub auth: AuthConfig,
+    #[serde(default)]
+    pub llm: LlmConfig,
 }
 
 /// Server configuration.
@@ -98,6 +100,42 @@ impl Default for AuthConfig {
     }
 }
 
+/// LLM integration configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LlmConfig {
+    /// Whether LLM-based guard is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// OpenRouter API key.
+    #[serde(default)]
+    pub openrouter_api_key: String,
+    /// Model to use for content safety classification.
+    #[serde(default = "default_guard_model")]
+    pub guard_model: String,
+    /// Request timeout in seconds.
+    #[serde(default = "default_timeout")]
+    pub timeout_secs: u64,
+}
+
+fn default_guard_model() -> String {
+    "meta-llama/llama-guard-4-12b".to_string()
+}
+
+fn default_timeout() -> u64 {
+    10
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            openrouter_api_key: String::new(),
+            guard_model: default_guard_model(),
+            timeout_secs: default_timeout(),
+        }
+    }
+}
+
 impl Config {
     /// Load configuration from files and environment.
     ///
@@ -112,9 +150,11 @@ impl Config {
             // Layer on local overrides
             .add_source(File::with_name("config/local").required(false))
             // Layer on environment variables with SHIELD_ prefix
+            // Use double underscore (__) as separator for nested keys
+            // Example: SHIELD_LLM__ENABLED=true sets llm.enabled
             .add_source(
                 Environment::with_prefix("SHIELD")
-                    .separator("_")
+                    .separator("__")
                     .try_parsing(true),
             )
             .build()?;

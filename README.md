@@ -19,10 +19,16 @@ Shield sits between LLM agents and financial execution APIs. The LLM/agent is tr
 │  │  Firewall   │──▶│   Checker   │──▶│   Engine    │──▶ Decision│
 │  │             │   │             │   │             │            │
 │  └─────────────┘   └─────────────┘   └─────────────┘            │
+│        │                                                        │
+│        ▼                                                        │
+│  ┌─────────────┐                                                │
+│  │ Llama Guard │   (optional neural layer via OpenRouter)       │
+│  │     4       │                                                │
+│  └─────────────┘                                                │
 │                                                                 │
 │  • Prompt injection    • Intent vs Action   • Amount thresholds │
 │  • Suspicious keywords • Misalignment       • Rate limits       │
-│  • Neural detectors*   • LLM judge*         • Business rules    │
+│  • Llama Guard 4       • Critical actions   • Business rules    │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -31,8 +37,6 @@ Shield sits between LLM agents and financial execution APIs. The LLM/agent is tr
                     │   HITL Queue    │
                     │  (if required)  │
                     └─────────────────┘
-
-* Stubbed for MVP, ready for integration
 ```
 
 ## Quick Start
@@ -209,6 +213,56 @@ Or via environment variable:
 ```bash
 SHIELD_AUTH__ENABLED=true cargo run
 ```
+
+## LLM Integration (Llama Guard 4)
+
+Shield Core can use **Meta Llama Guard 4** via OpenRouter for neural content safety classification. This adds an additional layer of protection against prompt injection, jailbreaks, and harmful content.
+
+### Enable Llama Guard
+
+1. Get an API key from [OpenRouter](https://openrouter.ai/)
+
+2. Configure via environment variables:
+```bash
+SHIELD_LLM_ENABLED=true \
+SHIELD_LLM_OPENROUTER_API_KEY=sk-or-v1-xxxxx \
+cargo run
+```
+
+Or via config file:
+```yaml
+# config/local.yaml
+llm:
+  enabled: true
+  openrouter_api_key: "sk-or-v1-xxxxx"
+  guard_model: "meta-llama/llama-guard-4-12b"
+  timeout_secs: 10
+```
+
+### How It Works
+
+When enabled, Llama Guard evaluates the content of each action against the [MLCommons hazard taxonomy](https://mlcommons.org/):
+
+| Category | Description | Action |
+|----------|-------------|--------|
+| S1 | Violent crimes | **BLOCK** |
+| S2 | Non-violent crimes (fraud) | HITL |
+| S4 | Child exploitation | **BLOCK** |
+| S6 | Specialized advice | HITL |
+| S7 | Privacy violation | HITL |
+| S9 | Weapons (CBRN) | **BLOCK** |
+| S10 | Hate speech | HITL |
+
+### Cost
+
+Llama Guard 4 on OpenRouter costs **$0.18/M tokens** (both input and output). A typical request uses ~300 tokens, costing about **$0.00005 per evaluation**.
+
+### Fallback Behavior
+
+If the Llama Guard API fails or times out:
+- The system **fails open** (continues to other checks)
+- Errors are logged for monitoring
+- Keyword-based firewall still provides protection
 
 ## API Endpoints
 

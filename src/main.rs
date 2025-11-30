@@ -22,7 +22,7 @@ use crate::auth::{ApiKeyValidator, JwtManager, UserStore};
 use crate::config::Config;
 use crate::engine::{
     CompositeFirewall, ConfigPolicyEngine, EvaluationCoordinator, HeuristicAlignmentChecker,
-    KeywordFirewall, NeuralFirewall,
+    KeywordFirewall,
 };
 use crate::storage::ShieldRepository;
 
@@ -41,6 +41,13 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load environment variables from .env file (if present)
+    // This is optional and won't fail if .env doesn't exist
+    if let Err(e) = dotenvy::dotenv() {
+        // Only log at debug level - missing .env is expected in production
+        eprintln!("Note: No .env file loaded ({e})");
+    }
+
     // Initialize logging
     logging::init();
 
@@ -78,13 +85,28 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Database connected and schema initialized");
 
     // Build the evaluation coordinator
-    let firewall = CompositeFirewall::new(vec![
-        Box::new(KeywordFirewall::new(
-            config.safety.suspicious_keywords.clone(),
-        )),
-        Box::new(NeuralFirewall::new(false)), // Disabled for MVP
-    ]);
+    let mut firewalls: Vec<Box<dyn engine::InputFirewall>> = vec![Box::new(KeywordFirewall::new(
+        config.safety.suspicious_keywords.clone(),
+    ))];
 
+    // Add Llama Guard if enabled
+    if config.llm.enabled && !config.llm.openrouter_api_key.is_empty() {
+        tracing::info!(
+            model = %config.llm.guard_model,
+            "Llama Guard neural firewall enabled"
+        );
+        let llm_config = engine::OpenRouterConfig {
+            api_key: config.llm.openrouter_api_key.clone(),
+            model: config.llm.guard_model.clone(),
+            timeout_secs: config.llm.timeout_secs,
+            enabled: true,
+        };
+        firewalls.push(Box::new(engine::SyncLlamaGuardFirewall::new(llm_config)));
+    } else {
+        tracing::info!("Llama Guard neural firewall disabled");
+    }
+
+    let firewall = CompositeFirewall::new(firewalls);
     let alignment_checker = HeuristicAlignmentChecker::new(false);
     let policy_engine = ConfigPolicyEngine::new(config.safety.clone());
 

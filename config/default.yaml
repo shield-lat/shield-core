@@ -15,16 +15,42 @@ safety:
   hitl_threshold: 1000.0
   # Maximum transfers allowed per hour per user (rate limiting)
   max_transfers_per_hour: 3
-  # Suspicious keywords for input firewall
+  # Suspicious keywords for input firewall (prompt injection detection)
   suspicious_keywords:
+    # Classic prompt injection
     - "ignore previous instructions"
+    - "ignore all previous"
+    - "disregard previous"
+    - "forget your instructions"
+    - "forget previous"
+    # Jailbreak attempts  
     - "bypass"
-    - "transfer all funds"
+    - "bypass all"
+    - "bypass security"
+    - "developer mode"
+    - "DAN mode"
+    - "jailbreak"
+    # System prompt leakage
+    - "print your system prompt"
+    - "show your instructions"
+    - "reveal your prompt"
+    - "what are your rules"
+    # Authority/privilege escalation
+    - "admin command"
+    - "execute command"
     - "override security"
     - "disregard rules"
+    - "you are now"
     - "pretend you are"
     - "act as if"
-    - "forget your instructions"
+    - "simulate being"
+    # Dangerous operations
+    - "transfer all funds"
+    - "transfer all money"
+    - "empty account"
+    - "drain account"
+    - "maximum transfer"
+    - "all available balance"
 
 # Authentication settings
 auth:
@@ -56,8 +82,14 @@ auth:
       password_hash: "2ae2107409cfc29923bd8429b398786c5bf41ea4bb0eccd3c5b11af42ca3fba3"
       role: admin
 
-# Future: LLM integration settings (not implemented in MVP)
-# llm:
-#   alignment_checker_endpoint: ""
-#   api_key: ""
+# LLM integration settings (Llama Guard via OpenRouter)
+llm:
+  # Enable neural content safety using Llama Guard 4
+  enabled: false
+  # OpenRouter API key - set via SHIELD_LLM_OPENROUTER_API_KEY env var
+  openrouter_api_key: ""
+  # Model to use for content classification
+  guard_model: "meta-llama/llama-guard-4-12b"
+  # Request timeout in seconds
+  timeout_secs: 10
 

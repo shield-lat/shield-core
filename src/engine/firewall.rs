@@ -59,12 +59,38 @@ impl KeywordFirewall {
     pub fn new(suspicious_keywords: Vec<String>) -> Self {
         // These are always blocked - clear prompt injection attempts
         let block_keywords = vec![
-            "ignore all previous instructions".to_string(),
+            // Classic prompt injection
+            "ignore previous instructions".to_string(),
+            "ignore all previous".to_string(),
+            "ignore your instructions".to_string(),
             "disregard your instructions".to_string(),
+            "disregard previous".to_string(),
+            "forget your instructions".to_string(),
+            "forget previous instructions".to_string(),
+            // Role hijacking
             "you are now".to_string(),
             "new persona".to_string(),
+            "act as".to_string(),
+            "pretend to be".to_string(),
+            "simulate being".to_string(),
+            // Jailbreak
             "jailbreak".to_string(),
             "DAN mode".to_string(),
+            "developer mode".to_string(),
+            // System exploitation
+            "print your system prompt".to_string(),
+            "show your instructions".to_string(),
+            "reveal your prompt".to_string(),
+            "what are your rules".to_string(),
+            // Dangerous commands
+            "admin command".to_string(),
+            "execute command".to_string(),
+            "sudo".to_string(),
+            // Financial exploitation
+            "transfer all funds".to_string(),
+            "transfer all money".to_string(),
+            "empty account".to_string(),
+            "drain account".to_string(),
         ];
 
         Self {
