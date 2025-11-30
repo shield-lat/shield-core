@@ -100,7 +100,11 @@ pub async fn simple_evaluate(
     let api_key = auth_header
         .strip_prefix("Bearer ")
         .or_else(|| auth_header.strip_prefix("bearer "))
-        .ok_or_else(|| ShieldError::Unauthorized("Invalid Authorization format. Use: Bearer <api_key>".to_string()))?;
+        .ok_or_else(|| {
+            ShieldError::Unauthorized(
+                "Invalid Authorization format. Use: Bearer <api_key>".to_string(),
+            )
+        })?;
 
     // Hash the API key and look up the app
     let api_key_hash = {
@@ -109,12 +113,17 @@ pub async fn simple_evaluate(
         hex::encode(hasher.finalize())
     };
 
-    let app = state.repository.get_app_by_api_key_hash(&api_key_hash).await
+    let app = state
+        .repository
+        .get_app_by_api_key_hash(&api_key_hash)
+        .await
         .map_err(|_| ShieldError::Unauthorized("Invalid API key".to_string()))?;
 
     // Check app is active
     if app.status != crate::domain::AppStatus::Active {
-        return Err(ShieldError::Unauthorized("API key is not active".to_string()));
+        return Err(ShieldError::Unauthorized(
+            "API key is not active".to_string(),
+        ));
     }
 
     // Update last_used_at for the app

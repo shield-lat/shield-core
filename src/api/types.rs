@@ -38,23 +38,23 @@ pub struct EvaluateActionResponse {
 pub struct SimpleEvaluateRequest {
     /// The user's input/intent to evaluate.
     pub input: String,
-    
+
     /// Type of action being proposed (optional, defaults to "unknown").
     #[serde(default)]
     pub action_type: Option<String>,
-    
+
     /// Additional payload data (optional).
     #[serde(default)]
     pub payload: Option<serde_json::Value>,
-    
+
     /// User identifier (optional, defaults to "anonymous").
     #[serde(default)]
     pub user_id: Option<String>,
-    
+
     /// Model name that generated this action (optional).
     #[serde(default)]
     pub model_name: Option<String>,
-    
+
     /// Chain of thought or reasoning (optional).
     #[serde(default)]
     pub cot_trace: Option<String>,
@@ -577,4 +577,3 @@ pub struct UpdateSettingsRequest {
     #[serde(default)]
     pub policy_thresholds: Option<PolicyThresholds>,
 }
-
