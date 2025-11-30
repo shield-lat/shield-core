@@ -7,8 +7,9 @@ use uuid::Uuid;
 use crate::domain::{
     AgentAction, App, AppStatus, AttackEvent, AttackOutcome, AttackType, Company, CompanyMember,
     CompanyRole, CompanySettings, DecisionStatus, EvaluationResult, Granularity, HitlStatus,
-    HitlTask, HitlTaskDetails, HitlTaskSummary, MetricsOverview, PolicyThresholds, RiskDistribution,
-    RiskDistributionPoint, RiskTier, TimeRange, TimeSeriesData, TimeSeriesPoint, Trends,
+    HitlTask, HitlTaskDetails, HitlTaskSummary, MetricsOverview, PolicyThresholds,
+    RiskDistribution, RiskDistributionPoint, RiskTier, TimeRange, TimeSeriesData, TimeSeriesPoint,
+    Trends,
 };
 use crate::error::{ShieldError, ShieldResult};
 use crate::storage::models::{
@@ -825,8 +826,8 @@ impl ShieldRepository {
         app_id: Option<Uuid>,
     ) -> ShieldResult<MetricsOverview> {
         let start_time = time_range.start_time().to_rfc3339();
-        let prev_start = (time_range.start_time() - chrono::Duration::hours(time_range.hours()))
-            .to_rfc3339();
+        let prev_start =
+            (time_range.start_time() - chrono::Duration::hours(time_range.hours())).to_rfc3339();
 
         // Current period counts
         let (total, blocked, escalated): (i64, i64, i64) = if let Some(app_id) = app_id {

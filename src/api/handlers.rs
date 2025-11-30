@@ -1047,9 +1047,7 @@ pub async fn delete_app(
 
 // ==================== Metrics Endpoints ====================
 
-use crate::domain::{
-    AttackOutcome, AttackType, DecisionStatus, Granularity, RiskTier, TimeRange,
-};
+use crate::domain::{AttackOutcome, AttackType, DecisionStatus, Granularity, RiskTier, TimeRange};
 
 /// Get metrics overview for a company.
 ///
@@ -1228,13 +1226,11 @@ pub async fn list_company_actions(
     let decision = query
         .decision
         .as_ref()
-        .map(|d| {
-            match d.to_lowercase().as_str() {
-                "allow" => Ok(DecisionStatus::Allow),
-                "require_hitl" => Ok(DecisionStatus::RequireHitl),
-                "block" => Ok(DecisionStatus::Block),
-                _ => Err(ShieldError::BadRequest(format!("Invalid decision: {}", d))),
-            }
+        .map(|d| match d.to_lowercase().as_str() {
+            "allow" => Ok(DecisionStatus::Allow),
+            "require_hitl" => Ok(DecisionStatus::RequireHitl),
+            "block" => Ok(DecisionStatus::Block),
+            _ => Err(ShieldError::BadRequest(format!("Invalid decision: {}", d))),
         })
         .transpose()?;
 
@@ -1360,7 +1356,15 @@ pub async fn list_attacks(
 
     let (attacks, total) = state
         .repository
-        .list_attack_events(id, query.app_id, attack_type, severity, outcome, limit, offset)
+        .list_attack_events(
+            id,
+            query.app_id,
+            attack_type,
+            severity,
+            outcome,
+            limit,
+            offset,
+        )
         .await?;
 
     Ok(Json(ListAttacksResponse { attacks, total }))

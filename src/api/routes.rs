@@ -263,7 +263,10 @@ fn build_authenticated_router(
             get(handlers::get_risk_distribution),
         )
         // Actions list
-        .route("/v1/companies/{id}/actions", get(handlers::list_company_actions))
+        .route(
+            "/v1/companies/{id}/actions",
+            get(handlers::list_company_actions),
+        )
         // Attacks
         .route("/v1/companies/{id}/attacks", get(handlers::list_attacks))
         // Settings
@@ -349,7 +352,10 @@ fn build_unauthenticated_router(state: AppState, auth_state: AuthState, cors: Co
             get(handlers::get_risk_distribution),
         )
         // Actions list
-        .route("/v1/companies/{id}/actions", get(handlers::list_company_actions))
+        .route(
+            "/v1/companies/{id}/actions",
+            get(handlers::list_company_actions),
+        )
         // Attacks
         .route("/v1/companies/{id}/attacks", get(handlers::list_attacks))
         // Settings
