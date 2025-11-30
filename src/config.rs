@@ -114,7 +114,7 @@ impl Config {
             // Layer on environment variables with SHIELD_ prefix
             .add_source(
                 Environment::with_prefix("SHIELD")
-                    .separator("__")
+                    .separator("_")
                     .try_parsing(true),
             )
             .build()?;
@@ -151,4 +151,3 @@ mod tests {
         assert!(!config.suspicious_keywords.is_empty());
     }
 }
-
