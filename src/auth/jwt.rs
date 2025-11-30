@@ -1,5 +1,12 @@
 //! JWT authentication for admin console users.
 
+use axum::{
+    async_trait,
+    extract::FromRequestParts,
+    http::{request::Parts, StatusCode},
+    response::{IntoResponse, Response},
+    Json,
+};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
 use serde::{Deserialize, Serialize};
@@ -21,6 +28,43 @@ pub struct Claims {
     pub iat: i64,
     /// Issuer.
     pub iss: String,
+}
+
+/// Error response when claims extraction fails.
+#[derive(Debug, Serialize)]
+struct ClaimsError {
+    error: String,
+    code: String,
+}
+
+impl IntoResponse for ClaimsError {
+    fn into_response(self) -> Response {
+        (StatusCode::UNAUTHORIZED, Json(self)).into_response()
+    }
+}
+
+/// Implement FromRequestParts to extract Claims from request extensions.
+/// This allows handlers to use `Claims` directly as an extractor.
+#[async_trait]
+impl<S> FromRequestParts<S> for Claims
+where
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<Claims>()
+            .cloned()
+            .ok_or_else(|| {
+                ClaimsError {
+                    error: "Authentication required".to_string(),
+                    code: "UNAUTHENTICATED".to_string(),
+                }
+                .into_response()
+            })
+    }
 }
 
 /// User roles for authorization.

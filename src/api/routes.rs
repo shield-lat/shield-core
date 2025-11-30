@@ -12,7 +12,7 @@ use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::api::handlers;
-use crate::auth::{require_api_key, require_jwt, ApiKeyValidator, JwtManager};
+use crate::auth::{optional_jwt, require_api_key, require_jwt, ApiKeyValidator, JwtManager};
 use crate::AppState;
 
 /// Security scheme modifier for OpenAPI.
@@ -317,6 +317,8 @@ fn build_authenticated_router(
 
 /// Build router without authentication (for development).
 fn build_unauthenticated_router(state: AppState, cors: CorsLayer) -> Router {
+    let jwt_manager = state.jwt_manager.clone();
+
     Router::new()
         // Action evaluation
         .route("/v1/actions/evaluate", post(handlers::evaluate_action))
@@ -389,6 +391,8 @@ fn build_unauthenticated_router(state: AppState, cors: CorsLayer) -> Router {
         .route("/v1/auth/token/refresh", post(handlers::refresh_token))
         .route("/v1/auth/login", post(handlers::login))
         .route("/v1/auth/oauth/sync", post(handlers::oauth_sync))
+        // Apply optional JWT middleware (validates token if present, doesn't fail if missing)
+        .layer(middleware::from_fn_with_state(jwt_manager, optional_jwt))
         .with_state(state)
         // OpenAPI docs
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))

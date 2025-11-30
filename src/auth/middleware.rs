@@ -101,6 +101,29 @@ pub async fn require_jwt(
     Ok(next.run(request).await)
 }
 
+/// Optional JWT validation - populates claims if token is valid, but doesn't fail if missing.
+///
+/// Used in development mode when auth is disabled but handlers still need claims.
+pub async fn optional_jwt(
+    State(jwt_manager): State<JwtManager>,
+    mut request: Request<Body>,
+    next: Next,
+) -> Response {
+    // Try to extract and validate token
+    if let Some(token) = request
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+    {
+        if let Ok(claims) = jwt_manager.validate_token(token) {
+            request.extensions_mut().insert(claims);
+        }
+    }
+
+    next.run(request).await
+}
+
 /// Middleware that requires reviewer role or higher.
 #[allow(dead_code)]
 pub async fn require_reviewer(request: Request<Body>, next: Next) -> Result<Response, AuthError> {

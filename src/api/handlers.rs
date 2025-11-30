@@ -485,7 +485,7 @@ pub async fn oauth_sync(
 )]
 pub async fn refresh_token(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
 ) -> ShieldResult<Json<TokenRefreshResponse>> {
     let token = state
         .jwt_manager
@@ -518,7 +518,7 @@ pub async fn refresh_token(
 )]
 pub async fn get_current_user(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
 ) -> ShieldResult<Json<CurrentUserResponse>> {
     // Try to get user from database
     if let Ok(user_id) = Uuid::parse_str(&claims.sub) {
@@ -576,7 +576,7 @@ use crate::domain::{App, Company, CompanyMember, CompanyRole};
 )]
 pub async fn create_company(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Json(request): Json<CreateCompanyRequest>,
 ) -> ShieldResult<(axum::http::StatusCode, Json<CompanyResponse>)> {
     if request.name.trim().is_empty() {
@@ -635,7 +635,7 @@ pub async fn create_company(
 )]
 pub async fn list_companies(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
 ) -> ShieldResult<Json<ListCompaniesResponse>> {
     let companies = state.repository.list_user_companies(&claims.sub).await?;
 
@@ -660,7 +660,7 @@ pub async fn list_companies(
 )]
 pub async fn get_company(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
 ) -> ShieldResult<Json<CompanyResponse>> {
     // Verify user is a member
@@ -694,7 +694,7 @@ pub async fn get_company(
 )]
 pub async fn update_company(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
     Json(request): Json<UpdateCompanyRequest>,
 ) -> ShieldResult<Json<CompanyResponse>> {
@@ -743,7 +743,7 @@ pub async fn update_company(
 )]
 pub async fn delete_company(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
 ) -> ShieldResult<axum::http::StatusCode> {
     // Only owners can delete
@@ -790,7 +790,7 @@ pub async fn delete_company(
 )]
 pub async fn list_company_members(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
 ) -> ShieldResult<Json<ListMembersResponse>> {
     // Verify user is a member
@@ -825,7 +825,7 @@ pub async fn list_company_members(
 )]
 pub async fn add_company_member(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
     Json(request): Json<AddMemberRequest>,
 ) -> ShieldResult<(axum::http::StatusCode, Json<MemberResponse>)> {
@@ -888,7 +888,7 @@ pub async fn add_company_member(
 )]
 pub async fn update_member_role(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path((company_id, user_id)): Path<(Uuid, String)>,
     Json(request): Json<UpdateMemberRoleRequest>,
 ) -> ShieldResult<Json<MemberResponse>> {
@@ -962,7 +962,7 @@ pub async fn update_member_role(
 )]
 pub async fn remove_company_member(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path((company_id, user_id)): Path<(Uuid, String)>,
 ) -> ShieldResult<axum::http::StatusCode> {
     // Verify user has admin/owner role
@@ -1041,7 +1041,7 @@ pub async fn remove_company_member(
 )]
 pub async fn list_company_apps(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
 ) -> ShieldResult<Json<ListAppsResponse>> {
     // Verify user is a member
@@ -1076,7 +1076,7 @@ pub async fn list_company_apps(
 )]
 pub async fn create_app(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
     Json(request): Json<CreateAppRequest>,
 ) -> ShieldResult<(axum::http::StatusCode, Json<CreateAppResponse>)> {
@@ -1142,7 +1142,7 @@ pub async fn create_app(
 )]
 pub async fn get_app(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path((company_id, app_id)): Path<(Uuid, Uuid)>,
 ) -> ShieldResult<Json<AppResponse>> {
     // Verify user is a member
@@ -1187,7 +1187,7 @@ pub async fn get_app(
 )]
 pub async fn update_app(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path((company_id, app_id)): Path<(Uuid, Uuid)>,
     Json(request): Json<UpdateAppRequest>,
 ) -> ShieldResult<Json<AppResponse>> {
@@ -1255,7 +1255,7 @@ pub async fn update_app(
 )]
 pub async fn delete_app(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path((company_id, app_id)): Path<(Uuid, Uuid)>,
 ) -> ShieldResult<axum::http::StatusCode> {
     // Verify user has admin/owner role
@@ -1318,7 +1318,7 @@ use crate::domain::{AttackOutcome, AttackType, DecisionStatus, Granularity, Risk
 )]
 pub async fn get_metrics_overview(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
     Query(query): Query<MetricsQuery>,
 ) -> ShieldResult<Json<MetricsOverviewResponse>> {
@@ -1364,7 +1364,7 @@ pub async fn get_metrics_overview(
 )]
 pub async fn get_time_series(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
     Query(query): Query<MetricsQuery>,
 ) -> ShieldResult<Json<TimeSeriesResponse>> {
@@ -1408,7 +1408,7 @@ pub async fn get_time_series(
 )]
 pub async fn get_risk_distribution(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
     Query(query): Query<MetricsQuery>,
 ) -> ShieldResult<Json<RiskDistributionResponse>> {
@@ -1460,7 +1460,7 @@ pub async fn get_risk_distribution(
 )]
 pub async fn list_company_actions(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
     Query(query): Query<ListActionsQuery>,
 ) -> ShieldResult<Json<ListActionsResponse>> {
@@ -1567,7 +1567,7 @@ pub async fn list_company_actions(
 )]
 pub async fn list_attacks(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
     Query(query): Query<ListAttacksQuery>,
 ) -> ShieldResult<Json<ListAttacksResponse>> {
@@ -1636,7 +1636,7 @@ pub async fn list_attacks(
 )]
 pub async fn get_company_settings(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
 ) -> ShieldResult<Json<SettingsResponse>> {
     let _ = state
@@ -1668,7 +1668,7 @@ pub async fn get_company_settings(
 )]
 pub async fn update_company_settings(
     State(state): State<AppState>,
-    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+    claims: crate::auth::Claims,
     Path(id): Path<Uuid>,
     Json(request): Json<UpdateSettingsRequest>,
 ) -> ShieldResult<Json<SettingsResponse>> {
