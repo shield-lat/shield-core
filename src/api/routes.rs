@@ -221,9 +221,9 @@ fn build_authenticated_router(
     let admin_routes = Router::new()
         // HITL routes
         .route("/v1/hitl/tasks", get(handlers::list_hitl_tasks))
-        .route("/v1/hitl/tasks/{id}", get(handlers::get_hitl_task))
+        .route("/v1/hitl/tasks/:id", get(handlers::get_hitl_task))
         .route(
-            "/v1/hitl/tasks/{id}/decision",
+            "/v1/hitl/tasks/:id/decision",
             post(handlers::submit_hitl_decision),
         )
         // Auth routes
@@ -234,53 +234,53 @@ fn build_authenticated_router(
             get(handlers::list_companies).post(handlers::create_company),
         )
         .route(
-            "/v1/companies/{id}",
+            "/v1/companies/:id",
             get(handlers::get_company)
                 .put(handlers::update_company)
                 .delete(handlers::delete_company),
         )
         .route(
-            "/v1/companies/{id}/members",
+            "/v1/companies/:id/members",
             get(handlers::list_company_members).post(handlers::add_company_member),
         )
         .route(
-            "/v1/companies/{company_id}/members/{user_id}",
+            "/v1/companies/:company_id/members/:user_id",
             put(handlers::update_member_role).delete(handlers::remove_company_member),
         )
         // App routes
         .route(
-            "/v1/companies/{id}/apps",
+            "/v1/companies/:id/apps",
             get(handlers::list_company_apps).post(handlers::create_app),
         )
         .route(
-            "/v1/companies/{company_id}/apps/{app_id}",
+            "/v1/companies/:company_id/apps/:app_id",
             get(handlers::get_app)
                 .put(handlers::update_app)
                 .delete(handlers::delete_app),
         )
         // Metrics routes
         .route(
-            "/v1/companies/{id}/metrics/overview",
+            "/v1/companies/:id/metrics/overview",
             get(handlers::get_metrics_overview),
         )
         .route(
-            "/v1/companies/{id}/metrics/time-series",
+            "/v1/companies/:id/metrics/time-series",
             get(handlers::get_time_series),
         )
         .route(
-            "/v1/companies/{id}/metrics/risk-distribution",
+            "/v1/companies/:id/metrics/risk-distribution",
             get(handlers::get_risk_distribution),
         )
         // Actions list
         .route(
-            "/v1/companies/{id}/actions",
+            "/v1/companies/:id/actions",
             get(handlers::list_company_actions),
         )
         // Attacks
-        .route("/v1/companies/{id}/attacks", get(handlers::list_attacks))
+        .route("/v1/companies/:id/attacks", get(handlers::list_attacks))
         // Settings
         .route(
-            "/v1/companies/{id}/settings",
+            "/v1/companies/:id/settings",
             get(handlers::get_company_settings).put(handlers::update_company_settings),
         )
         .layer(middleware::from_fn_with_state(
@@ -324,9 +324,9 @@ fn build_unauthenticated_router(state: AppState, cors: CorsLayer) -> Router {
         .route("/v1/actions/evaluate", post(handlers::evaluate_action))
         // HITL management
         .route("/v1/hitl/tasks", get(handlers::list_hitl_tasks))
-        .route("/v1/hitl/tasks/{id}", get(handlers::get_hitl_task))
+        .route("/v1/hitl/tasks/:id", get(handlers::get_hitl_task))
         .route(
-            "/v1/hitl/tasks/{id}/decision",
+            "/v1/hitl/tasks/:id/decision",
             post(handlers::submit_hitl_decision),
         )
         // Company routes
@@ -335,53 +335,53 @@ fn build_unauthenticated_router(state: AppState, cors: CorsLayer) -> Router {
             get(handlers::list_companies).post(handlers::create_company),
         )
         .route(
-            "/v1/companies/{id}",
+            "/v1/companies/:id",
             get(handlers::get_company)
                 .put(handlers::update_company)
                 .delete(handlers::delete_company),
         )
         .route(
-            "/v1/companies/{id}/members",
+            "/v1/companies/:id/members",
             get(handlers::list_company_members).post(handlers::add_company_member),
         )
         .route(
-            "/v1/companies/{company_id}/members/{user_id}",
+            "/v1/companies/:company_id/members/:user_id",
             put(handlers::update_member_role).delete(handlers::remove_company_member),
         )
         // App routes
         .route(
-            "/v1/companies/{id}/apps",
+            "/v1/companies/:id/apps",
             get(handlers::list_company_apps).post(handlers::create_app),
         )
         .route(
-            "/v1/companies/{company_id}/apps/{app_id}",
+            "/v1/companies/:company_id/apps/:app_id",
             get(handlers::get_app)
                 .put(handlers::update_app)
                 .delete(handlers::delete_app),
         )
         // Metrics routes
         .route(
-            "/v1/companies/{id}/metrics/overview",
+            "/v1/companies/:id/metrics/overview",
             get(handlers::get_metrics_overview),
         )
         .route(
-            "/v1/companies/{id}/metrics/time-series",
+            "/v1/companies/:id/metrics/time-series",
             get(handlers::get_time_series),
         )
         .route(
-            "/v1/companies/{id}/metrics/risk-distribution",
+            "/v1/companies/:id/metrics/risk-distribution",
             get(handlers::get_risk_distribution),
         )
         // Actions list
         .route(
-            "/v1/companies/{id}/actions",
+            "/v1/companies/:id/actions",
             get(handlers::list_company_actions),
         )
         // Attacks
-        .route("/v1/companies/{id}/attacks", get(handlers::list_attacks))
+        .route("/v1/companies/:id/attacks", get(handlers::list_attacks))
         // Settings
         .route(
-            "/v1/companies/{id}/settings",
+            "/v1/companies/:id/settings",
             get(handlers::get_company_settings).put(handlers::update_company_settings),
         )
         // Health
