@@ -231,12 +231,22 @@ impl ConfigPolicyEngine {
                 });
             }
             ActionType::Unknown => {
-                rules.push(TriggeredRule {
-                    rule_id: "ACTION_TYPE_UNKNOWN".to_string(),
-                    description: "Action type could not be classified".to_string(),
-                    suggests_block: false,
-                    requires_hitl: true,
-                });
+                // Only flag unknown actions if they contain financial data
+                // Simple messages like "hello" should pass through
+                if let Some(amount) = action.extract_amount() {
+                    if amount > 0.0 {
+                        rules.push(TriggeredRule {
+                            rule_id: "ACTION_TYPE_UNKNOWN_WITH_AMOUNT".to_string(),
+                            description: format!(
+                                "Unknown action type with amount ${:.2} requires review",
+                                amount
+                            ),
+                            suggests_block: false,
+                            requires_hitl: true,
+                        });
+                    }
+                }
+                // Unknown actions without amounts are allowed (conversational/info queries)
             }
             // Read-only actions are generally safe
             ActionType::GetBalance | ActionType::GetTransactions => {}
