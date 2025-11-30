@@ -155,6 +155,7 @@ pub async fn simple_evaluate(
     tracing::info!(
         trace_id = %action.trace_id,
         app_id = %app.id,
+        company_id = %app.company_id,
         app_name = %app.name,
         user_id = %action.user_id,
         action_type = %action.action_type,
@@ -164,8 +165,11 @@ pub async fn simple_evaluate(
     // Run the evaluation pipeline
     let result = state.coordinator.evaluate(&action);
 
-    // Persist action and evaluation
-    state.repository.save_action(&action).await?;
+    // Persist action and evaluation (with company_id for activity log queries)
+    state
+        .repository
+        .save_action_with_company(&action, app.company_id)
+        .await?;
     state.repository.save_evaluation(&result.evaluation).await?;
 
     // Create HITL task if needed
