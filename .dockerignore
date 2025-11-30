@@ -1,0 +1,26 @@
+# Build artifacts
+target/
+*.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Local config
+config/local.yaml
+
+# Misc
+.DS_Store
+Thumbs.db
+

@@ -1,0 +1,8 @@
+[build]
+# Railway auto-detects Dockerfile when present
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/v1/health"
+healthcheckTimeout = 30
+restartPolicyMaxRetries = 3
