@@ -11,7 +11,7 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::api::handlers::{self, AuthState};
+use crate::api::handlers;
 use crate::auth::{require_api_key, require_jwt, ApiKeyValidator, JwtManager};
 use crate::AppState;
 
@@ -50,6 +50,8 @@ impl Modify for SecurityAddon {
         handlers::submit_hitl_decision,
         handlers::health_check,
         handlers::login,
+        handlers::oauth_sync,
+        handlers::refresh_token,
         handlers::get_current_user,
         // Company endpoints
         handlers::create_company,
@@ -91,6 +93,15 @@ impl Modify for SecurityAddon {
         crate::api::types::LoginRequest,
         crate::api::types::LoginResponse,
         crate::api::types::UserInfo,
+        crate::api::types::UserInfoResponse,
+        crate::api::types::OAuthSyncRequest,
+        crate::api::types::OAuthSyncResponse,
+        crate::api::types::TokenRefreshResponse,
+        crate::api::types::CurrentUserResponse,
+        crate::domain::User,
+        crate::domain::UserRole,
+        crate::domain::OAuthProvider,
+        crate::domain::UserCompanyMembership,
         // Company types
         crate::api::types::CreateCompanyRequest,
         crate::api::types::UpdateCompanyRequest,
@@ -177,7 +188,6 @@ pub fn build_router(
     auth_enabled: bool,
     api_key_validator: ApiKeyValidator,
     jwt_manager: JwtManager,
-    auth_state: AuthState,
 ) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -185,9 +195,9 @@ pub fn build_router(
         .allow_headers(Any);
 
     if auth_enabled {
-        build_authenticated_router(state, api_key_validator, jwt_manager, auth_state, cors)
+        build_authenticated_router(state, api_key_validator, jwt_manager, cors)
     } else {
-        build_unauthenticated_router(state, auth_state, cors)
+        build_unauthenticated_router(state, cors)
     }
 }
 
@@ -196,7 +206,6 @@ fn build_authenticated_router(
     state: AppState,
     api_key_validator: ApiKeyValidator,
     jwt_manager: JwtManager,
-    auth_state: AuthState,
     cors: CorsLayer,
 ) -> Router {
     // Routes requiring API key (for agents)
@@ -280,16 +289,26 @@ fn build_authenticated_router(
         ))
         .with_state(state.clone());
 
+    // Token refresh route (requires JWT)
+    let token_refresh_routes = Router::new()
+        .route("/v1/auth/token/refresh", post(handlers::refresh_token))
+        .layer(middleware::from_fn_with_state(
+            jwt_manager.clone(),
+            require_jwt,
+        ))
+        .with_state(state.clone());
+
     // Public routes (no auth required)
     let public_routes = Router::new()
         .route("/v1/health", get(handlers::health_check))
-        .with_state(state.clone())
         .route("/v1/auth/login", post(handlers::login))
-        .with_state(auth_state);
+        .route("/v1/auth/oauth/sync", post(handlers::oauth_sync))
+        .with_state(state.clone());
 
     Router::new()
         .merge(agent_routes)
         .merge(admin_routes)
+        .merge(token_refresh_routes)
         .merge(public_routes)
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .layer(TraceLayer::new_for_http())
@@ -297,7 +316,7 @@ fn build_authenticated_router(
 }
 
 /// Build router without authentication (for development).
-fn build_unauthenticated_router(state: AppState, auth_state: AuthState, cors: CorsLayer) -> Router {
+fn build_unauthenticated_router(state: AppState, cors: CorsLayer) -> Router {
     Router::new()
         // Action evaluation
         .route("/v1/actions/evaluate", post(handlers::evaluate_action))
@@ -365,10 +384,12 @@ fn build_unauthenticated_router(state: AppState, auth_state: AuthState, cors: Co
         )
         // Health
         .route("/v1/health", get(handlers::health_check))
-        .with_state(state)
-        // Auth (still available for testing)
+        // Auth endpoints
+        .route("/v1/auth/me", get(handlers::get_current_user))
+        .route("/v1/auth/token/refresh", post(handlers::refresh_token))
         .route("/v1/auth/login", post(handlers::login))
-        .with_state(auth_state)
+        .route("/v1/auth/oauth/sync", post(handlers::oauth_sync))
+        .with_state(state)
         // OpenAPI docs
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         // Middleware

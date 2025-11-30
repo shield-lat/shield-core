@@ -1,12 +1,13 @@
 //! API request and response types.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::domain::{
-    AgentAction, App, AppStatus, Company, CompanyMember, CompanyRole,
-    EvaluationResult, HitlStatus, HitlTaskDetails, HitlTaskSummary,
+    AgentAction, App, AppStatus, Company, CompanyMember, CompanyRole, EvaluationResult, HitlStatus,
+    HitlTaskDetails, HitlTaskSummary, User, UserCompanyMembership, UserRole,
 };
 
 // ==================== Evaluate Action ====================
@@ -121,15 +122,52 @@ pub struct LoginRequest {
 /// Login response.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LoginResponse {
+    /// User information.
+    pub user: UserInfoResponse,
     /// JWT token.
     pub token: String,
-    /// User information.
-    pub user: UserInfo,
     /// Token expiration in seconds.
     pub expires_in: i64,
+    /// Companies the user belongs to.
+    pub companies: Vec<UserCompanyMembership>,
 }
 
-/// User information.
+/// User information in API responses.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UserInfoResponse {
+    /// User ID.
+    pub id: Uuid,
+    /// User email.
+    pub email: String,
+    /// User's display name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Avatar image URL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// User role.
+    pub role: UserRole,
+    /// Whether email is verified.
+    pub email_verified: bool,
+    /// When the user was created.
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<User> for UserInfoResponse {
+    fn from(user: User) -> Self {
+        Self {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            image: user.image,
+            role: user.role,
+            email_verified: user.email_verified,
+            created_at: user.created_at,
+        }
+    }
+}
+
+/// Legacy user info (for backward compatibility).
 #[derive(Debug, Serialize, ToSchema)]
 pub struct UserInfo {
     /// User ID.
@@ -138,6 +176,61 @@ pub struct UserInfo {
     pub email: String,
     /// User role.
     pub role: String,
+}
+
+// ==================== OAuth ====================
+
+/// OAuth sync request.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct OAuthSyncRequest {
+    /// OAuth provider (google, github).
+    pub provider: String,
+    /// Provider's user ID.
+    pub provider_id: String,
+    /// User's email address.
+    pub email: String,
+    /// User's display name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Avatar image URL.
+    #[serde(default)]
+    pub image: Option<String>,
+    /// Whether the email is verified by the provider.
+    #[serde(default)]
+    pub email_verified: bool,
+}
+
+/// OAuth sync response.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct OAuthSyncResponse {
+    /// User information.
+    pub user: UserInfoResponse,
+    /// JWT token for Shield Core API.
+    pub token: String,
+    /// Token expiration in seconds.
+    pub expires_in: i64,
+    /// Whether this is a newly created user.
+    pub is_new_user: bool,
+    /// Companies the user belongs to.
+    pub companies: Vec<UserCompanyMembership>,
+}
+
+/// Token refresh response.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TokenRefreshResponse {
+    /// New JWT token.
+    pub token: String,
+    /// Token expiration in seconds.
+    pub expires_in: i64,
+}
+
+/// Current user response (for /auth/me).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CurrentUserResponse {
+    /// User information.
+    pub user: UserInfoResponse,
+    /// Companies the user belongs to.
+    pub companies: Vec<UserCompanyMembership>,
 }
 
 // ==================== Companies ====================

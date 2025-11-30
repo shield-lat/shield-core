@@ -9,6 +9,7 @@ mod evaluation;
 mod hitl;
 mod metrics;
 mod settings;
+mod user;
 
 pub use action::*;
 pub use attack::*;
@@ -17,4 +18,5 @@ pub use evaluation::*;
 pub use hitl::*;
 pub use metrics::*;
 pub use settings::*;
+pub use user::*;
 

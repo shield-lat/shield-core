@@ -18,7 +18,6 @@ mod logging;
 mod storage;
 
 use crate::api::build_router;
-use crate::api::handlers::AuthState;
 use crate::auth::{ApiKeyValidator, JwtManager, UserStore};
 use crate::config::Config;
 use crate::engine::{
@@ -34,6 +33,10 @@ pub struct AppState {
     pub coordinator: Arc<EvaluationCoordinator>,
     /// Database repository.
     pub repository: ShieldRepository,
+    /// JWT manager for token operations.
+    pub jwt_manager: JwtManager,
+    /// User store for config-based users (legacy).
+    pub user_store: UserStore,
 }
 
 #[tokio::main]
@@ -91,12 +94,6 @@ async fn main() -> anyhow::Result<()> {
         Box::new(policy_engine),
     ));
 
-    // Build application state
-    let state = AppState {
-        coordinator,
-        repository,
-    };
-
     // Build authentication components
     let api_key_validator = ApiKeyValidator::new(config.auth.api_keys.clone());
     let jwt_manager = JwtManager::new(
@@ -105,9 +102,13 @@ async fn main() -> anyhow::Result<()> {
         config.auth.token_duration_hours,
     );
     let user_store = UserStore::new(config.auth.users.clone());
-    let auth_state = AuthState {
+
+    // Build application state
+    let state = AppState {
+        coordinator,
+        repository,
         jwt_manager: jwt_manager.clone(),
-        user_store,
+        user_store: user_store.clone(),
     };
 
     if config.auth.enabled {
@@ -121,13 +122,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build router
-    let app = build_router(
-        state,
-        config.auth.enabled,
-        api_key_validator,
-        jwt_manager,
-        auth_state,
-    );
+    let app = build_router(state, config.auth.enabled, api_key_validator, jwt_manager);
 
     // Start server
     let addr = format!("{}:{}", config.server.host, config.server.port);

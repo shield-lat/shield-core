@@ -7,14 +7,14 @@ use uuid::Uuid;
 use crate::domain::{
     AgentAction, App, AppStatus, AttackEvent, AttackOutcome, AttackType, Company, CompanyMember,
     CompanyRole, CompanySettings, DecisionStatus, EvaluationResult, Granularity, HitlStatus,
-    HitlTask, HitlTaskDetails, HitlTaskSummary, MetricsOverview, PolicyThresholds,
-    RiskDistribution, RiskDistributionPoint, RiskTier, TimeRange, TimeSeriesData, TimeSeriesPoint,
-    Trends,
+    HitlTask, HitlTaskDetails, HitlTaskSummary, MetricsOverview, OAuthAccount, OAuthProvider,
+    PolicyThresholds, RiskDistribution, RiskDistributionPoint, RiskTier, TimeRange, TimeSeriesData,
+    TimeSeriesPoint, Trends, User, UserCompanyMembership,
 };
 use crate::error::{ShieldError, ShieldResult};
 use crate::storage::models::{
     ActionListRow, AgentActionRow, AppRow, AttackEventRow, CompanyMemberRow, CompanyRow,
-    CompanySettingsRow, EvaluationRow, HitlTaskRow, HitlTaskSummaryRow,
+    CompanySettingsRow, EvaluationRow, HitlTaskRow, HitlTaskSummaryRow, OAuthAccountRow, UserRow,
 };
 
 /// Repository for all Shield database operations.
@@ -213,6 +213,47 @@ impl ShieldRepository {
                 require_hitl_for_new_beneficiaries INTEGER NOT NULL DEFAULT 1,
                 FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
             );
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Users table (for OAuth and password auth)
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                name TEXT,
+                image TEXT,
+                role TEXT NOT NULL DEFAULT 'member',
+                email_verified INTEGER NOT NULL DEFAULT 0,
+                password_hash TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // OAuth accounts table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS oauth_accounts (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                provider_account_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(provider, provider_account_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_oauth_accounts_user_id ON oauth_accounts(user_id);
+            CREATE INDEX IF NOT EXISTS idx_oauth_accounts_provider ON oauth_accounts(provider, provider_account_id);
             "#,
         )
         .execute(&self.pool)
@@ -1449,6 +1490,166 @@ impl ShieldRepository {
         }
 
         self.get_company_settings(company_id).await
+    }
+
+    // ==================== Users ====================
+
+    /// Create a new user.
+    pub async fn create_user(&self, user: &User) -> ShieldResult<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO users (id, email, name, image, role, email_verified, password_hash, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(user.id.to_string())
+        .bind(&user.email)
+        .bind(&user.name)
+        .bind(&user.image)
+        .bind(user.role.to_string())
+        .bind(if user.email_verified { 1 } else { 0 })
+        .bind(&user.password_hash)
+        .bind(user.created_at.to_rfc3339())
+        .bind(user.updated_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get a user by ID.
+    pub async fn get_user(&self, id: Uuid) -> ShieldResult<User> {
+        let row: UserRow = sqlx::query_as("SELECT * FROM users WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| ShieldError::NotFound(format!("User {} not found", id)))?;
+
+        row.try_into()
+    }
+
+    /// Get a user by email.
+    pub async fn get_user_by_email(&self, email: &str) -> ShieldResult<Option<User>> {
+        let row: Option<UserRow> = sqlx::query_as("SELECT * FROM users WHERE email = ?")
+            .bind(email)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        row.map(|r| r.try_into()).transpose()
+    }
+
+    /// Update a user.
+    pub async fn update_user(
+        &self,
+        id: Uuid,
+        name: Option<&str>,
+        image: Option<&str>,
+    ) -> ShieldResult<User> {
+        let updated_at = chrono::Utc::now().to_rfc3339();
+
+        if let Some(name) = name {
+            sqlx::query("UPDATE users SET name = ?, updated_at = ? WHERE id = ?")
+                .bind(name)
+                .bind(&updated_at)
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?;
+        }
+
+        if let Some(image) = image {
+            sqlx::query("UPDATE users SET image = ?, updated_at = ? WHERE id = ?")
+                .bind(image)
+                .bind(&updated_at)
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await?;
+        }
+
+        self.get_user(id).await
+    }
+
+    // ==================== OAuth Accounts ====================
+
+    /// Create an OAuth account link.
+    pub async fn create_oauth_account(&self, account: &OAuthAccount) -> ShieldResult<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO oauth_accounts (id, user_id, provider, provider_account_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(account.id.to_string())
+        .bind(account.user_id.to_string())
+        .bind(account.provider.to_string())
+        .bind(&account.provider_account_id)
+        .bind(account.created_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Find a user by OAuth provider and account ID.
+    pub async fn find_user_by_oauth(
+        &self,
+        provider: OAuthProvider,
+        provider_account_id: &str,
+    ) -> ShieldResult<Option<User>> {
+        let row: Option<UserRow> = sqlx::query_as(
+            r#"
+            SELECT u.* FROM users u
+            JOIN oauth_accounts oa ON u.id = oa.user_id
+            WHERE oa.provider = ? AND oa.provider_account_id = ?
+            "#,
+        )
+        .bind(provider.to_string())
+        .bind(provider_account_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|r| r.try_into()).transpose()
+    }
+
+    /// Get all OAuth accounts for a user.
+    pub async fn get_user_oauth_accounts(&self, user_id: Uuid) -> ShieldResult<Vec<OAuthAccount>> {
+        let rows: Vec<OAuthAccountRow> =
+            sqlx::query_as("SELECT * FROM oauth_accounts WHERE user_id = ?")
+                .bind(user_id.to_string())
+                .fetch_all(&self.pool)
+                .await?;
+
+        rows.into_iter().map(|r| r.try_into()).collect()
+    }
+
+    /// Get companies for a user (with their role in each).
+    pub async fn get_user_companies(
+        &self,
+        user_id: &str,
+    ) -> ShieldResult<Vec<UserCompanyMembership>> {
+        let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+            r#"
+            SELECT c.id, c.name, c.slug, m.role
+            FROM companies c
+            JOIN company_members m ON c.id = m.company_id
+            WHERE m.user_id = ?
+            ORDER BY c.name ASC
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, name, slug, role)| {
+                Uuid::parse_str(&id).ok().map(|id| UserCompanyMembership {
+                    id,
+                    name,
+                    slug,
+                    role,
+                })
+            })
+            .collect())
     }
 }
 

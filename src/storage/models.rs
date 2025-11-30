@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::domain::{
     AgentAction, App, AppStatus, AttackEvent, AttackOutcome, AttackType, Company, CompanyMember,
-    CompanyRole, CompanySettings, EvaluationResult, HitlTask, HitlTaskSummary, PolicyThresholds,
-    RiskTier,
+    CompanyRole, CompanySettings, EvaluationResult, HitlTask, HitlTaskSummary, OAuthAccount,
+    OAuthProvider, PolicyThresholds, RiskTier, User, UserRole,
 };
 
 /// Database row for agent_actions table.
@@ -406,4 +406,77 @@ pub struct ActionListRow {
     pub risk_tier: String,
     pub reasons: String,
     pub created_at: String,
+}
+
+// ==================== Users ====================
+
+/// Database row for users table.
+#[derive(Debug, Clone, FromRow)]
+pub struct UserRow {
+    pub id: String,
+    pub email: String,
+    pub name: Option<String>,
+    pub image: Option<String>,
+    pub role: String,
+    pub email_verified: i32,
+    pub password_hash: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl TryFrom<UserRow> for User {
+    type Error = crate::error::ShieldError;
+
+    fn try_from(row: UserRow) -> Result<Self, Self::Error> {
+        Ok(User {
+            id: Uuid::parse_str(&row.id)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
+            email: row.email,
+            name: row.name,
+            image: row.image,
+            role: row
+                .role
+                .parse::<UserRole>()
+                .map_err(crate::error::ShieldError::Internal)?,
+            email_verified: row.email_verified != 0,
+            password_hash: row.password_hash,
+            created_at: DateTime::parse_from_rfc3339(&row.created_at)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?
+                .with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.updated_at)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?
+                .with_timezone(&Utc),
+        })
+    }
+}
+
+/// Database row for oauth_accounts table.
+#[derive(Debug, Clone, FromRow)]
+pub struct OAuthAccountRow {
+    pub id: String,
+    pub user_id: String,
+    pub provider: String,
+    pub provider_account_id: String,
+    pub created_at: String,
+}
+
+impl TryFrom<OAuthAccountRow> for OAuthAccount {
+    type Error = crate::error::ShieldError;
+
+    fn try_from(row: OAuthAccountRow) -> Result<Self, Self::Error> {
+        Ok(OAuthAccount {
+            id: Uuid::parse_str(&row.id)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
+            user_id: Uuid::parse_str(&row.user_id)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?,
+            provider: row
+                .provider
+                .parse::<OAuthProvider>()
+                .map_err(crate::error::ShieldError::Internal)?,
+            provider_account_id: row.provider_account_id,
+            created_at: DateTime::parse_from_rfc3339(&row.created_at)
+                .map_err(|e| crate::error::ShieldError::Internal(e.to_string()))?
+                .with_timezone(&Utc),
+        })
+    }
 }

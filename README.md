@@ -121,6 +121,80 @@ curl http://localhost:8080/v1/hitl/tasks \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
 ```
 
+### 3. OAuth Integration (for NextAuth.js)
+
+Shield Core supports OAuth user provisioning for frontend apps using NextAuth.js (Google, GitHub).
+
+**Sync OAuth user:**
+
+```bash
+curl -X POST http://localhost:8080/v1/auth/oauth/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "google",
+    "provider_id": "123456789",
+    "email": "user@example.com",
+    "name": "John Doe",
+    "image": "https://...",
+    "email_verified": true
+  }'
+```
+
+Response:
+```json
+{
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "email": "user@example.com",
+    "name": "John Doe",
+    "image": "https://...",
+    "role": "member",
+    "email_verified": true,
+    "created_at": "2024-01-15T10:00:00Z"
+  },
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "expires_in": 86400,
+  "is_new_user": true,
+  "companies": []
+}
+```
+
+**Get current user with companies:**
+
+```bash
+curl http://localhost:8080/v1/auth/me \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```
+
+Response:
+```json
+{
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "email": "user@example.com",
+    "name": "John Doe",
+    "role": "member",
+    "email_verified": true,
+    "created_at": "2024-01-15T10:00:00Z"
+  },
+  "companies": [
+    {
+      "id": "company-uuid",
+      "name": "Acme Inc",
+      "slug": "acme-inc",
+      "role": "owner"
+    }
+  ]
+}
+```
+
+**Refresh token:**
+
+```bash
+curl -X POST http://localhost:8080/v1/auth/token/refresh \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```
+
 ### Disabling Auth (Development)
 
 By default, authentication is disabled for easy development. Enable it for production:

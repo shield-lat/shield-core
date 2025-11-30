@@ -7,17 +7,9 @@ use axum::{
 use uuid::Uuid;
 
 use crate::api::types::*;
-use crate::auth::{JwtManager, UserStore};
 use crate::domain::HitlStatus;
 use crate::error::{ShieldError, ShieldResult};
 use crate::AppState;
-
-/// Authentication state for login endpoint.
-#[derive(Clone)]
-pub struct AuthState {
-    pub jwt_manager: JwtManager,
-    pub user_store: UserStore,
-}
 
 /// Evaluate an agent action through the safety pipeline.
 ///
@@ -238,6 +230,8 @@ pub async fn health_check(State(state): State<AppState>) -> Json<HealthResponse>
 
 // ==================== Authentication Endpoints ====================
 
+use crate::domain::{OAuthAccount, OAuthProvider, User, UserRole as DomainUserRole};
+
 /// Login to obtain a JWT token.
 ///
 /// POST /v1/auth/login
@@ -252,18 +246,52 @@ pub async fn health_check(State(state): State<AppState>) -> Json<HealthResponse>
     tag = "auth"
 )]
 pub async fn login(
-    State(auth_state): State<AuthState>,
+    State(state): State<AppState>,
     Json(request): Json<LoginRequest>,
 ) -> ShieldResult<Json<LoginResponse>> {
-    let user = auth_state
+    // Try database first
+    if let Some(db_user) = state.repository.get_user_by_email(&request.email).await? {
+        if db_user.verify_password(&request.password) {
+            let token = state.jwt_manager.generate_token(
+                &db_user.id.to_string(),
+                &db_user.email,
+                match db_user.role {
+                    DomainUserRole::Admin => crate::auth::UserRole::Admin,
+                    DomainUserRole::Member => crate::auth::UserRole::Reviewer,
+                },
+            )?;
+
+            let companies = state
+                .repository
+                .get_user_companies(&db_user.id.to_string())
+                .await?;
+
+            tracing::info!(
+                user_id = %db_user.id,
+                email = %db_user.email,
+                role = ?db_user.role,
+                "User logged in (database)"
+            );
+
+            return Ok(Json(LoginResponse {
+                user: db_user.into(),
+                token,
+                expires_in: state.jwt_manager.token_duration_hours() * 3600,
+                companies,
+            }));
+        }
+    }
+
+    // Fall back to config-based users
+    let user = state
         .user_store
         .authenticate(&request.email, &request.password)
         .ok_or_else(|| {
             tracing::warn!(email = %request.email, "Failed login attempt");
-            ShieldError::BadRequest("Invalid email or password".to_string())
+            ShieldError::Unauthorized("Invalid email or password".to_string())
         })?;
 
-    let token = auth_state
+    let token = state
         .jwt_manager
         .generate_token(&user.id, &user.email, user.role)?;
 
@@ -271,17 +299,207 @@ pub async fn login(
         user_id = %user.id,
         email = %user.email,
         role = ?user.role,
-        "User logged in"
+        "User logged in (config)"
     );
 
     Ok(Json(LoginResponse {
-        token,
-        user: UserInfo {
-            id: user.id.clone(),
+        user: UserInfoResponse {
+            id: Uuid::parse_str(&user.id).unwrap_or_else(|_| Uuid::new_v4()),
             email: user.email.clone(),
-            role: format!("{:?}", user.role).to_lowercase(),
+            name: None,
+            image: None,
+            role: match user.role {
+                crate::auth::UserRole::Admin => crate::domain::UserRole::Admin,
+                _ => crate::domain::UserRole::Member,
+            },
+            email_verified: true,
+            created_at: chrono::Utc::now(),
         },
-        expires_in: auth_state.jwt_manager.token_duration_hours() * 3600,
+        token,
+        expires_in: state.jwt_manager.token_duration_hours() * 3600,
+        companies: vec![],
+    }))
+}
+
+/// OAuth user sync/provision endpoint.
+///
+/// When a user signs in via OAuth (Google/GitHub), the frontend calls this
+/// to register/sync them with Shield Core.
+///
+/// POST /v1/auth/oauth/sync
+#[utoipa::path(
+    post,
+    path = "/v1/auth/oauth/sync",
+    request_body = OAuthSyncRequest,
+    responses(
+        (status = 200, description = "User synced/created", body = OAuthSyncResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "auth"
+)]
+pub async fn oauth_sync(
+    State(state): State<AppState>,
+    Json(request): Json<OAuthSyncRequest>,
+) -> ShieldResult<Json<OAuthSyncResponse>> {
+    let provider: OAuthProvider = request
+        .provider
+        .parse()
+        .map_err(|_| ShieldError::BadRequest(format!("Invalid provider: {}", request.provider)))?;
+
+    tracing::info!(
+        provider = %request.provider,
+        provider_id = %request.provider_id,
+        email = %request.email,
+        "OAuth sync request"
+    );
+
+    // 1. Look up user by provider + provider_id
+    if let Some(user) = state
+        .repository
+        .find_user_by_oauth(provider, &request.provider_id)
+        .await?
+    {
+        // User exists - generate JWT and return
+        let token = state.jwt_manager.generate_token(
+            &user.id.to_string(),
+            &user.email,
+            match user.role {
+                DomainUserRole::Admin => crate::auth::UserRole::Admin,
+                DomainUserRole::Member => crate::auth::UserRole::Reviewer,
+            },
+        )?;
+
+        let companies = state
+            .repository
+            .get_user_companies(&user.id.to_string())
+            .await?;
+
+        tracing::info!(
+            user_id = %user.id,
+            email = %user.email,
+            "OAuth sync: existing user"
+        );
+
+        return Ok(Json(OAuthSyncResponse {
+            user: user.into(),
+            token,
+            expires_in: state.jwt_manager.token_duration_hours() * 3600,
+            is_new_user: false,
+            companies,
+        }));
+    }
+
+    // 2. Check if email is already registered
+    if let Some(existing) = state.repository.get_user_by_email(&request.email).await? {
+        // Link OAuth to existing account
+        let oauth_account = OAuthAccount::new(existing.id, provider, request.provider_id.clone());
+        state
+            .repository
+            .create_oauth_account(&oauth_account)
+            .await?;
+
+        let token = state.jwt_manager.generate_token(
+            &existing.id.to_string(),
+            &existing.email,
+            match existing.role {
+                DomainUserRole::Admin => crate::auth::UserRole::Admin,
+                DomainUserRole::Member => crate::auth::UserRole::Reviewer,
+            },
+        )?;
+
+        let companies = state
+            .repository
+            .get_user_companies(&existing.id.to_string())
+            .await?;
+
+        tracing::info!(
+            user_id = %existing.id,
+            email = %existing.email,
+            provider = %request.provider,
+            "OAuth sync: linked to existing account"
+        );
+
+        return Ok(Json(OAuthSyncResponse {
+            user: existing.into(),
+            token,
+            expires_in: state.jwt_manager.token_duration_hours() * 3600,
+            is_new_user: false,
+            companies,
+        }));
+    }
+
+    // 3. Create new user
+    let new_user = User::new_from_oauth(
+        request.email.clone(),
+        request.name.clone(),
+        request.image.clone(),
+        request.email_verified,
+    );
+
+    state.repository.create_user(&new_user).await?;
+
+    // Link OAuth account
+    let oauth_account = OAuthAccount::new(new_user.id, provider, request.provider_id.clone());
+    state
+        .repository
+        .create_oauth_account(&oauth_account)
+        .await?;
+
+    let token = state.jwt_manager.generate_token(
+        &new_user.id.to_string(),
+        &new_user.email,
+        match new_user.role {
+            DomainUserRole::Admin => crate::auth::UserRole::Admin,
+            DomainUserRole::Member => crate::auth::UserRole::Reviewer,
+        },
+    )?;
+
+    tracing::info!(
+        user_id = %new_user.id,
+        email = %new_user.email,
+        provider = %request.provider,
+        "OAuth sync: created new user"
+    );
+
+    Ok(Json(OAuthSyncResponse {
+        user: new_user.into(),
+        token,
+        expires_in: state.jwt_manager.token_duration_hours() * 3600,
+        is_new_user: true,
+        companies: vec![],
+    }))
+}
+
+/// Refresh an expiring token.
+///
+/// POST /v1/auth/token/refresh
+#[utoipa::path(
+    post,
+    path = "/v1/auth/token/refresh",
+    responses(
+        (status = 200, description = "Token refreshed", body = TokenRefreshResponse),
+        (status = 401, description = "Invalid or expired token")
+    ),
+    security(("bearer_auth" = [])),
+    tag = "auth"
+)]
+pub async fn refresh_token(
+    State(state): State<AppState>,
+    axum::Extension(claims): axum::Extension<crate::auth::Claims>,
+) -> ShieldResult<Json<TokenRefreshResponse>> {
+    let token = state
+        .jwt_manager
+        .generate_token(&claims.sub, &claims.email, claims.role)?;
+
+    tracing::info!(
+        user_id = %claims.sub,
+        email = %claims.email,
+        "Token refreshed"
+    );
+
+    Ok(Json(TokenRefreshResponse {
+        token,
+        expires_in: state.jwt_manager.token_duration_hours() * 3600,
     }))
 }
 
@@ -292,20 +510,49 @@ pub async fn login(
     get,
     path = "/v1/auth/me",
     responses(
-        (status = 200, description = "Current user info", body = UserInfo),
+        (status = 200, description = "Current user info", body = CurrentUserResponse),
         (status = 401, description = "Not authenticated")
     ),
     security(("bearer_auth" = [])),
     tag = "auth"
 )]
 pub async fn get_current_user(
+    State(state): State<AppState>,
     axum::Extension(claims): axum::Extension<crate::auth::Claims>,
-) -> Json<UserInfo> {
-    Json(UserInfo {
-        id: claims.sub,
-        email: claims.email,
-        role: format!("{:?}", claims.role).to_lowercase(),
-    })
+) -> ShieldResult<Json<CurrentUserResponse>> {
+    // Try to get user from database
+    if let Ok(user_id) = Uuid::parse_str(&claims.sub) {
+        if let Ok(user) = state.repository.get_user(user_id).await {
+            let companies = state.repository.get_user_companies(&claims.sub).await?;
+            return Ok(Json(CurrentUserResponse {
+                user: user.into(),
+                companies,
+            }));
+        }
+    }
+
+    // Fall back to claims-based response (for config-based users)
+    let companies = state
+        .repository
+        .get_user_companies(&claims.sub)
+        .await
+        .unwrap_or_default();
+
+    Ok(Json(CurrentUserResponse {
+        user: UserInfoResponse {
+            id: Uuid::parse_str(&claims.sub).unwrap_or_else(|_| Uuid::new_v4()),
+            email: claims.email.clone(),
+            name: None,
+            image: None,
+            role: match claims.role {
+                crate::auth::UserRole::Admin => crate::domain::UserRole::Admin,
+                _ => crate::domain::UserRole::Member,
+            },
+            email_verified: true,
+            created_at: chrono::Utc::now(),
+        },
+        companies,
+    }))
 }
 
 // ==================== Company Endpoints ====================
